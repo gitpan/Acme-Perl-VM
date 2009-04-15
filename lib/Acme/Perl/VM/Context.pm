@@ -76,6 +76,10 @@ has argarray => (
 	isa => 'B::AV',
 );
 
+has lval => (
+	is  => 'rw',
+	isa => 'Bool',
+);
 
 sub CURPAD_SAVE{
 	my($cx) = @_;

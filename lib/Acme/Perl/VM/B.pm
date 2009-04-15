@@ -51,8 +51,15 @@ sub object_2svref{
 
 	return $special_sv{ $$obj } || do{
 		my $name = $B::specialsv_name[$$obj] || sprintf 'SPECIAL(0x%x)', $$obj;
-		Carp::croak($name, ' is not a normal SV object');
+		Carp::confess($name, ' is not a normal SV object');
 	};
+}
+
+sub setval{
+	my($obj) = @_;
+
+	my $name = $B::specialsv_name[$$obj] || sprintf 'SPECIAL(0x%x)', $$obj;
+	Acme::Perl::VM::apvm_die("Modification of read-only value ($name) attempted");
 }
 
 package
@@ -116,6 +123,17 @@ sub clear{
 	return;
 }
 
+sub fetch{
+	my($av, $ix, $lval) = @_;
+
+	if($lval){
+		return B::svref_2object(\$av->object_2svref->[$ix]);
+	}
+	else{
+		return $av->ARRAYelt($ix);
+	}
+}
+
 unless(__PACKAGE__->can('OFF')){
 	# some versions of B::Debug requires this
 	constant->import(OFF => 0);
@@ -132,6 +150,25 @@ sub clear{
 	%{$sv->object_2svref} = ();
 	return;
 }
+
+sub fetch{
+	my($hv, $key, $lval) = @_;
+
+	if($lval){
+		return B::svref_2object(\$hv->object_2svref->{$key});
+	}
+	else{
+		my $ref = $hv->object_2svref;
+
+		if(exists $ref->{$key}){
+			return B::svref_2object($ref->{$key});
+		}
+		else{
+			return Acme::Perl::VM::B::NULL;
+		}
+	}
+}
+
 
 1;
 

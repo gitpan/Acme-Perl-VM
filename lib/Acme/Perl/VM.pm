@@ -5,7 +5,7 @@ use strict;
 use warnings;
 
 BEGIN{
-	require version; our $VERSION = version::qv('0.0.1_01');
+	require version; our $VERSION = version::qv('0.0.1_02');
 }
 
 use constant APVM_DEBUG  => ($ENV{APVM_DEBUG} || do{ our $VERSION->is_alpha || 0 });
@@ -42,13 +42,16 @@ BEGIN{
 		SAVETMPS FREETMPS
 		SAVE SAVECOMPPAD SAVECLEARSV
 
-		OP_GIMME GIMME_V
+		OP_GIMME GIMME_V LVRET
+
 		PAD_SV PAD_SET_CUR_NOSAVE PAD_SET_CUR
 		CX_CURPAD_SAVE CX_CURPAD_SV
 
 		dopoptosub
 
 		deb apvm_warn apvm_die
+
+		GVOP_gv
 
 		sv_newmortal sv_mortalcopy
 		SvPV SvNV SvTRUE
@@ -145,8 +148,8 @@ sub mess{ # util.c
 	my($fmt, @args) = @_;
 	my $msg = sprintf $fmt, @args;
 
-	return sprintf "[APVM]%s in %s at %s line %d.\n",
-		$msg, $PL_op->name, $PL_curcop->file, $PL_curcop->line;
+	return sprintf "[APVM] %s in %s at %s line %d.\n",
+		$msg, $PL_op->desc, $PL_curcop->file, $PL_curcop->line;
 }
 
 sub apvm_warn{
@@ -170,9 +173,9 @@ sub TOPMARK(){
 sub PUSH{
 	my($sv) = @_;
 
-	if(!$sv){
+	if(!defined $sv){
 		$PL_op->dump();
-		Carp::confess('Illegal PUSH(undef)');
+		Carp::confess('PUSH(NULL)');
 	}
 
 	push @PL_stack, $sv;
@@ -437,7 +440,23 @@ sub GIMME_V(){ # op.h
 	return OP_GIMME($PL_op, block_gimme());
 }
 
-# Utilities
+sub LVRET(){ # cf. is_lvalue_sub() in pp_ctl.h
+	if($PL_op->flags & OPpMAYBE_LVSUB){
+		my $cxix = dopoptosub($#PL_cxstack);
+
+		if($PL_cxstack[$cxix]->lval && $PL_cxstack[$cxix]->cv->CvFLAGS & CVf_LVALUE){
+			not_implemented 'lvalue';
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
+sub GVOP_gv{
+	my($op) = @_;
+
+	return USE_ITHREADS ? PAD_SV($op->padix) : $op->gv;
+}
 
 sub sv_newmortal{
 	my $sv;
@@ -448,6 +467,10 @@ sub sv_newmortal{
 
 sub sv_mortalcopy{
 	my($sv) = @_;
+
+	if(!defined $sv){
+		Carp::confess('sv_mortalcopy(NULL)');
+	}
 
 	my $newsv =${$sv->object_2svref};
 	push @PL_tmps, \$newsv;
@@ -488,6 +511,8 @@ sub defoutgv{
 	no strict 'refs';
 	return \*{ select() };
 }
+
+# Utilities
 
 sub sv_defined{
 	my($sv) = @_;

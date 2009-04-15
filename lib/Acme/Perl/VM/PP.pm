@@ -42,32 +42,48 @@ sub pp_const{
 }
 
 sub pp_gv{
-	if(USE_ITHREADS){
-		PUSH(  PAD_SV( $PL_op->padix ) );
-	}
-	else{
-		PUSH( $PL_op->gv );
-	}
+	PUSH( GVOP_gv($PL_op) );
 	return $PL_op->next;
 }
 
 sub pp_rv2av{
 	my $sv = TOP;
 
-	# TODO
-
-	if($sv->isa('B::GV')){
-		$sv = $sv->AV;
+	if($sv->ROK){
+		not_implemented 'pp_rv2av for RV';
 	}
 
-	if(GIMME_V == G_ARRAY){
+	if($sv->isa('B::AV')){
+		if($PL_op->flags & OPf_REF){
+			SET($sv);
+			return $PL_op->next;
+		}
+		elsif(LVRET){
+			not_implemented 'lvalue';
+		}
+	}
+	else{
+		$sv->isa('B::GV') or apvm_die 'Not a GLOB';
+		$sv = $sv->AV;
+
+		if($PL_op->flags & OPf_REF){
+			SET($sv);
+			return $PL_op->next;
+		}
+		elsif(LVRET){
+			not_implemented 'lvalue';
+		}
+	}
+
+	my $gimme = GIMME_V;
+	if($gimme == G_ARRAY){
 		POP;
 
 		foreach my $elem( @{$sv->object_2svref} ){
 			PUSH($elem);
 		}
 	}
-	else{
+	elsif($gimme == G_SCALAR){
 		SETval( $sv->FILL + 1 );
 	}
 
@@ -129,7 +145,7 @@ sub _method_common{
 sub pp_method{
 	my $sv = TOP;
 
-	if($sv->flags & SVf_ROK){
+	if($sv->ROK){
 		if($sv->RV->isa('B::CV')){
 			SET($sv->RV);
 			return $PL_op->next;
@@ -404,7 +420,9 @@ sub pp_aassign{
 	my @rhs = @PL_stack[$first_r_elem .. $last_r_elem];
 
 	if($PL_op->private & OPpASSIGN_COMMON){
-		not_implemented 'pp_assign for OPpASSIGN_COMMON';
+		for(my $r_elem = $first_r_elem; $r_elem <= $last_r_elem; $r_elem++){
+			$PL_stack[$r_elem] = sv_mortalcopy($PL_stack[$r_elem]);
+		}
 	}
 
 	my $ary_ref;
@@ -546,9 +564,31 @@ sub pp_print{
 }
 
 sub pp_aelemfast{
-	my $av = GET_TARGET;
+	my $av   = $PL_op->flags & OPf_SPECIAL ? PAD_SV($PL_op->targ) : GVOP_gv($PL_op)->AV;
+	my $lval = $PL_op->flags & OPf_MOD;
 
-	my $sv = $av->ARRAYelt($PL_op->private);
+	my $sv   = $av->fetch($PL_op->private, $lval);
+	PUSH( is_not_null($sv) ? $sv : sv_undef );
+
+	return $PL_op->next;
+}
+
+sub pp_aelem{
+	my $elemsv = POP;
+	my $av     = POP;
+	my $lval  = $PL_op->flags & OPf_MOD;
+
+	my $sv = $av->fetch(SvNV($elemsv), $lval);
+	PUSH( is_not_null($sv) ? $sv : sv_undef );
+	return $PL_op->next;
+}
+
+sub pp_helem{
+	my $keysv = POP;
+	my $hv    = TOP;
+	my $lval  = $PL_op->flags & OPf_MOD;
+
+	my $sv = $hv->fetch(SvPV($keysv), $lval);
 	PUSH( is_not_null($sv) ? $sv : sv_undef );
 
 	return $PL_op->next;
