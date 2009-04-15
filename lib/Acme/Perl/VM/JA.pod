@@ -1,0 +1,49 @@
+
+=encoding utf-8
+
+=head1 NAME
+
+Acme::Perl::VM::JA - An implementation of Perl5 Virtual Machine in Pure Perl (APVM)
+
+=head1 SYNOPSIS
+
+	use Acme::Perl::VM;
+
+	run_block{
+		print "Hello, APVM world!\n";
+	}
+
+=head1 DESCRIPTION
+
+C<Amce::Perl::VM>はPure Perlで実装されたPerl5の仮想マシンです。
+
+このモジュールの詳細は2009年4月22日に開催されるB<Shibuya.pm テクニカルトーク#11>で解説される予定です。
+
+=head1 AUTHOR
+
+Goro Fuji (gfx) E<lt>gfuji(at)cpan.orgE<gt>.
+
+=head1 SEE ALSO
+
+F<pp.h> for PUSH/POP macros.
+
+F<pp.c>, F<pp_ctl.c>, and F<pp_hot.c> for ppcodes.
+
+C<op.h> for opcodes.
+
+F<cop.h> for COP and context blocks.
+
+F<scope.h> and F<scope.c> for scope stacks.
+
+F<pad.h> and F<pad.c> for pad variables.
+
+F<run.c> for runops.
+
+=head1 LICENSE AND COPYRIGHT
+
+Copyright (c) 2009, Goro Fuji (gfx). Some rights reserved.
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
+
+=cut
