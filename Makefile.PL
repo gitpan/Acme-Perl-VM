@@ -9,7 +9,6 @@ requires 'Exporter' => 5.57;
 requires 'Mouse'    => 0.21;
 requires 'B';
 requires 'version';
-requires 'Carp::Always';
 
 test_requires 'Test::More' => 0.62;
 

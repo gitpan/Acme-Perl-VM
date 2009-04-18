@@ -5,7 +5,7 @@ use strict;
 use warnings;
 
 BEGIN{
-	require version; our $VERSION = version::qv('0.0.1_02');
+	require version; our $VERSION = version::qv('0.0.1_03');
 }
 
 use constant APVM_DEBUG  => ($ENV{APVM_DEBUG} || do{ our $VERSION->is_alpha || 0 });
@@ -24,6 +24,7 @@ BEGIN{
 		@PL_stack @PL_markstack @PL_cxstack @PL_scopestack @PL_savestack @PL_tmps
 		$PL_tmps_floor
 		$PL_comppad @PL_curpad
+		$PL_last_in_gv
 		$PL_runops
 
 		PUSHMARK POPMARK TOPMARK
@@ -32,7 +33,7 @@ BEGIN{
 		GET_TARGETSTACKED
 		GET_ATARGET
 
-		PUSHBLOCK POPBLOCK
+		PUSHBLOCK POPBLOCK TOPBLOCK
 		PUSHSUB POPSUB
 		PUSHLOOP POPLOOP
 
@@ -41,20 +42,23 @@ BEGIN{
 		ENTER LEAVE LEAVE_SCOPE
 		SAVETMPS FREETMPS
 		SAVE SAVECOMPPAD SAVECLEARSV
+		save_scalar save_ary save_hash
 
 		OP_GIMME GIMME_V LVRET
 
 		PAD_SV PAD_SET_CUR_NOSAVE PAD_SET_CUR
 		CX_CURPAD_SAVE CX_CURPAD_SV
 
-		dopoptosub
+		dopoptosub dopoptoloop dopoptolabel
 
-		deb apvm_warn apvm_die
+		deb apvm_warn apvm_die croak
 
 		GVOP_gv
 
-		sv_newmortal sv_mortalcopy
-		SvPV SvNV SvTRUE
+		hv_scalar
+		vivify_ref
+		sv_newmortal sv_mortalcopy sv_2mortal
+		SvPV SvNV SvIV SvTRUE
 		defoutgv
 
 		sv_defined is_null is_not_null
@@ -62,6 +66,7 @@ BEGIN{
 		not_implemented
 		dump_object dump_value dump_stacks
 		APVM_DEBUG
+		APVM_SCOPE APVM_TRACE
 	);
 	our %EXPORT_TAGS = (
 		perl_h => \@EXPORT_OK,
@@ -74,11 +79,6 @@ use Acme::Perl::VM::PP;
 use Acme::Perl::VM::B;
 
 use Carp ();
-
-if(APVM_DEBUG){
-	require Carp::Heavy;
-	require Carp::Always;
-}
 
 our $PL_op;
 our $PL_curcop;
@@ -94,6 +94,8 @@ our $PL_tmps_floor;
 
 our $PL_comppad;
 our @PL_curpad;
+
+our $PL_last_in_gv;
 
 our $PL_runops = \&runops_standard;
 
@@ -112,14 +114,14 @@ if(APVM_TRACE){
 
 sub runops_standard{ # run.c
 	our %ppaddr;
-	1 while(is_not_null( $PL_op = &{$ppaddr{ $PL_op->name } || not_implemented($PL_op->ppaddr)} ));
+	1 while(${ $PL_op = &{$ppaddr{ $PL_op->name } || not_implemented($PL_op->ppaddr)} });
 	return;
 }
 
 sub runops_trace{
 	our %ppaddr;
 
-	while(is_not_null( $PL_op = &{$ppaddr{ $PL_op->name } || not_implemented($PL_op->ppaddr)} )){
+	while(${ $PL_op = &{$ppaddr{ $PL_op->name } || not_implemented($PL_op->ppaddr)} }){
 
 		deb '%s%s', (q{.} x @PL_cxstack), uc($PL_op->name);
 		if($PL_op->isa('B::COP')){
@@ -147,16 +149,53 @@ sub deb{
 sub mess{ # util.c
 	my($fmt, @args) = @_;
 	my $msg = sprintf $fmt, @args;
-
 	return sprintf "[APVM] %s in %s at %s line %d.\n",
 		$msg, $PL_op->desc, $PL_curcop->file, $PL_curcop->line;
 }
 
+sub longmess{
+	my $msg = mess(@_);
+
+	my $cxix = $#PL_cxstack;
+	while( ($cxix = dopoptosub($cxix)) >= 0 ){
+		my $cx   = $PL_cxstack[$cxix];
+		my $cop  = $cx->oldcop;
+
+		last if is_null($cop);
+
+		my $args;
+
+		if($cx->argarray){
+			$args = sprintf '(%s)', join q{,},
+			map{ defined($_) ? qq{'$_'} : 'undef' }
+				@{ $cx->argarray->object_2svref };
+		}
+		else{
+			$args = '';
+		}
+
+		my $cvgv = $cx->cv->GV;
+		$msg .= sprintf qq{\t%s::%s%s called at %s line %d.\n},
+			$cvgv->STASH->NAME, $cvgv->NAME, $args,
+			$cop->file, $cop->line;
+
+		$cxix--;
+	}
+	return $msg;
+}
+
 sub apvm_warn{
-	warn mess(@_)
+	warn APVM_DEBUG ? longmess(@_) : mess(@_);
 }
 sub apvm_die{
-	die mess(@_);
+	# not yet implemented completely
+	# cf.
+	# die_where() in pp_ctl.c
+	# vdie()      in util.c
+	die  APVM_DEBUG ? longmess(@_) : mess(@_);
+}
+sub croak{
+	die  APVM_DEBUG ? longmess(@_) : mess(@_);
 }
 
 sub PUSHMARK(){
@@ -171,14 +210,7 @@ sub TOPMARK(){
 }
 
 sub PUSH{
-	my($sv) = @_;
-
-	if(!defined $sv){
-		$PL_op->dump();
-		Carp::confess('PUSH(NULL)');
-	}
-
-	push @PL_stack, $sv;
+	push @PL_stack, @_;
 	return;
 }
 sub POP(){
@@ -241,6 +273,15 @@ sub POPBLOCK{
 
 	return $cx;
 }
+sub TOPBLOCK{
+	my $cx = $PL_cxstack[-1];
+
+	$#PL_stack      = $cx->oldsp;
+	$#PL_markstack  = $cx->oldmarksp;
+	$#PL_scopestack = $cx->oldscopesp;
+
+	return $cx;
+}
 
 sub PUSHSUB{
 	my($cx, %args) = @_;
@@ -263,8 +304,8 @@ sub PUSHLOOP{
 
 	$cx->label($PL_curcop->label);
 	$cx->resetsp($args{sp});
-	$cx->my_op($PL_op);
-	$cx->next_op($PL_op->nextop);
+	$cx->myop($PL_op);
+	$cx->nextop($PL_op->nextop);
 
 	if($args{data}){
 		$cx->ITERDATA_SET($args{data});
@@ -358,6 +399,21 @@ sub SAVECLEARSV{
 	);
 	return;
 }
+sub save_scalar{
+	my($gv) = @_;
+	push @PL_savestack, Acme::Perl::VM::Scope::Scalar->new(gv => $gv);
+	return $PL_savestack[-1]->sv;
+}
+sub save_ary{
+	my($gv) = @_;
+	push @PL_savestack, Acme::Perl::VM::Scope::Array->new(gv => $gv);
+	return $PL_savestack[-1]->sv;
+}
+sub save_hash{
+	my($gv) = @_;
+	push @PL_savestack, Acme::Perl::VM::Scope::Hash->new(gv => $gv);
+	return $PL_savestack[-1]->sv;
+}
 
 sub PAD_SET_CUR_NOSAVE{
 	my($padlist, $nth) = @_;
@@ -390,6 +446,50 @@ sub dopoptosub{
 
 		if($type eq 'EVAL' or $type eq 'SUB'){
 			return $i;
+		}
+	}
+	return -1;
+}
+
+sub dopoptoloop{
+	my($startingblock) = @_;
+
+	my %loop;
+	@loop{qw(SUBST SUB EVAL NULL)} = ();
+	$loop{LOOP} = 1;
+
+	for(my $i = $startingblock; $i >= 0; --$i){
+		my $cx   = $PL_cxstack[$i];
+		my $type = $cx->type;
+
+		if(exists $loop{$type}){
+			if(!$loop{$type}){
+				apvm_warn 'Exsiting %s via %s', $type, $PL_op->name;
+				$i = -1 if $type eq 'NULL';
+			}
+			return $i;
+		}
+	}
+	return -1;
+}
+sub dopoptolabel{
+	my($label) = @_;
+	my %loop;
+	@loop{qw(SUBST SUB EVAL NULL)} = ();
+	$loop{LOOP} = 1;
+
+	for(my $i = $#PL_cxstack; $i >= 0; --$i){
+		my $cx   = $PL_cxstack[$i];
+		my $type = $cx->type;
+
+		if(exists $loop{$type}){
+			if(!$loop{$type}){
+				apvm_warn 'Exsiting %s via %s', $type, $PL_op->name;
+				return $type eq 'NULL' ? -1 : $i;
+			}
+			elsif($cx->label && $cx->label eq $label){
+				return $i;
+			}
 		}
 	}
 	return -1;
@@ -458,13 +558,22 @@ sub GVOP_gv{
 	return USE_ITHREADS ? PAD_SV($op->padix) : $op->gv;
 }
 
+sub hv_scalar{
+	my($hv) = @_;
+	my $sv = sv_newmortal();
+	$sv->setval(scalar %{ $hv->object_2svref });
+	return $sv;
+}
+
+sub vivify_ref{
+	not_implemented 'vivify_ref';
+}
+
 sub sv_newmortal{
 	my $sv;
-
 	push @PL_tmps, \$sv;
 	return B::svref_2object(\$sv);
 }
-
 sub sv_mortalcopy{
 	my($sv) = @_;
 
@@ -476,27 +585,37 @@ sub sv_mortalcopy{
 	push @PL_tmps, \$newsv;
 	return B::svref_2object(\$newsv);
 }
+sub sv_2mortal{
+	my($sv) = @_;
+
+	if(!defined $sv){
+		Carp::confess('sv_2mortal(NULL)');
+	}
+
+	push @PL_tmps, $sv->object_2svref;
+	return $sv;
+}
 
 sub SvTRUE{
 	my($sv) = @_;
 
 	return ${ $sv->object_2svref } ? TRUE : FALSE;
 }
+
 sub SvPV{
 	my($sv) = @_;
 	my $ref = $sv->object_2svref;
 
 	if(!defined ${$ref}){
 		apvm_warn 'Use of uninitialized value';
-
 		return q{};
 	}
 
 	return "${$ref}";
 }
+
 sub SvNV{
 	my($sv) = @_;
-
 	my $ref = $sv->object_2svref;
 
 	if(!defined ${$ref}){
@@ -505,6 +624,18 @@ sub SvNV{
 	}
 
 	return ${$ref} + 0;
+}
+
+sub SvIV{
+	my($sv) = @_;
+	my $ref = $sv->object_2svref;
+
+	if(!defined ${$ref}){
+		apvm_warn 'Use of uninitialized value';
+		return 0;
+	}
+
+	return int(${$ref});
 }
 
 sub defoutgv{
@@ -522,11 +653,11 @@ sub sv_defined{
 
 sub is_not_null{
 	my($sv) = @_;
-	return ${$sv} != 0;
+	return ${$sv};
 }
 sub is_null{
 	my($sv) = @_;
-	return ${$sv} == 0;
+	return !${$sv};
 }
 
 sub mark_list{
@@ -567,9 +698,9 @@ sub dump_stacks{
 }
 
 sub not_implemented{
-	my($name) = @_;
-
-	Carp::confess $name, ' is not implemented';
+	my $opname = $PL_op && is_not_null($PL_op) ? $PL_op->name . ': ' : '';
+	@_ =sprintf('%s%s is not implemented', $opname, join('', @_));
+	goto &Carp::confess;
 }
 
 
@@ -593,13 +724,12 @@ sub call_sv{ # perl.h
 	$PL_op = Acme::Perl::VM::OP_CallSV->new(
 		cv    => $cv,
 		next  => NULL,
-		flags => OP_GIMME_REVERSE($flags || 0x00),
+		flags => OP_GIMME_REVERSE($flags),
 	);
 	PUSH($cv);
 
 	my $oldmark  = TOPMARK;
 
-	$PL_op = Acme::Perl::VM::PP::pp_entersub();
 	$PL_runops->();
 
 	my $retval = $#PL_stack - $oldmark;
@@ -623,27 +753,30 @@ sub run_block(&@){
 		return $code->(@args);
 	}
 
+	local $SIG{__DIE__}  = \&Carp::confess;
+	local $SIG{__WARN__} = \&Carp::cluck;
+
 	ENTER;
 	SAVETMPS;
 
 	PUSHMARK;
-	PUSH($_) for @args;
+	PUSH(@args);
 
-	my $mark   = $#PL_stack - call_sv(B::svref_2object($code), want2gimme(wantarray));
+	my $gimme  = want2gimme(wantarray);
+	my $mark   = $#PL_stack - call_sv(B::svref_2object($code), $gimme);
 	my @retval = map{ ${ $_->object_2svref } } mark_list($mark);
 
 	FREETMPS;
 	LEAVE;
 
-	if(wantarray){ # list context
-		return @retval;
-	}
-	elsif(defined wantarray){ # scalar context
+	if($gimme == G_SCALAR){
 		return $retval[-1];
 	}
-	else{ # void context
-		return;
+	elsif($gimme == G_ARRAY){
+		return @retval;
 	}
+
+	return;
 }
 
 package

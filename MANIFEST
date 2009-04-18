@@ -1,8 +1,11 @@
 Changes
 example/funcall.pl
 example/hello.pl
+example/loop.pl
 example/methcall.pl
+example/quine.pl
 example/run.pl
+example/warn.pl
 inc/Module/Install.pm
 inc/Module/Install/AuthorTests.pm
 inc/Module/Install/Base.pm
@@ -29,6 +32,10 @@ t/04_funcall.t
 t/05_methcall.t
 t/06_misc.t
 t/07_loop.t
+t/08_array.t
+t/09_hash.t
+t/10_rv2xv.t
+t/11_readline.t
 xt/01_podspell.t
 xt/02_pod.t
 xt/03_pod-coverage.t

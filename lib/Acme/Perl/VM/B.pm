@@ -29,6 +29,8 @@ use constant {
 package
 	B::OBJECT;
 
+use B qw(class);
+
 sub dump{
 	my($obj) = @_;
 	require B::Debug;
@@ -61,6 +63,8 @@ sub setval{
 	my $name = $B::specialsv_name[$$obj] || sprintf 'SPECIAL(0x%x)', $$obj;
 	Acme::Perl::VM::apvm_die("Modification of read-only value ($name) attempted");
 }
+
+sub STASH{ undef }
 
 package
 	B::SV;
@@ -98,6 +102,8 @@ sub toCV{
 	Carp::croak(sprintf 'Cannot convert %s to a CV', B::class($sv));
 }
 
+sub STASH{ undef }
+
 package
 	B::CV;
 
@@ -121,17 +127,6 @@ sub clear{
 
 	@{$sv->object_2svref} = ();
 	return;
-}
-
-sub fetch{
-	my($av, $ix, $lval) = @_;
-
-	if($lval){
-		return B::svref_2object(\$av->object_2svref->[$ix]);
-	}
-	else{
-		return $av->ARRAYelt($ix);
-	}
 }
 
 unless(__PACKAGE__->can('OFF')){
@@ -161,7 +156,7 @@ sub fetch{
 		my $ref = $hv->object_2svref;
 
 		if(exists $ref->{$key}){
-			return B::svref_2object($ref->{$key});
+			return B::svref_2object(\$ref->{$key});
 		}
 		else{
 			return Acme::Perl::VM::B::NULL;
@@ -169,7 +164,32 @@ sub fetch{
 	}
 }
 
+sub fetch_ent{
+	my($hv, $keysv, $lval) = @_;
+	return $hv->fetch(${ $keysv->object_2svref }, $lval);
+}
 
+sub exists{
+	my($hv, $key) = @_;
+	return exists $hv->object_2svref->{$key};
+}
+sub exists_ent{
+	my($hv, $keysv) = @_;
+	return exists $hv->object_2svref->{${ $keysv->object_2svref}};
+}
+
+sub store{
+	my($hv, $key, $val) = @_;
+
+	$hv->object_2svref->{$key} = ${ $val->object_2svref };
+	return B::svref_2object(\$hv->object_2svref->{$key}) if defined wantarray;
+}
+sub store_ent{
+	my($hv, $keysv, $val) = @_;
+
+	$hv->object_2svref->{${ $keysv->object_2svref }} = ${ $val->object_2svref };
+	return B::svref_2object(\$hv->object_2svref->{${ $keysv->object_2svref }}) if defined wantarray;
+}
 1;
 
 __END__

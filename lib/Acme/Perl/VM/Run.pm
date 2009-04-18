@@ -9,18 +9,20 @@ use B qw(main_start comppadlist);
 
 no warnings 'void';
 INIT{
-	ENTER;
-	SAVETMPS;
+	if(is_not_null(main_start)){
+		ENTER;
+		SAVETMPS;
 
-	$PL_curcop ||= bless \do{ my $addr = 0 }, 'B::COP'; # dummy cop
+		$PL_curcop ||= bless \do{ my $addr = 0 }, 'B::COP'; # dummy cop
 
-	$PL_op = main_start;
+		$PL_op = main_start;
+		PAD_SET_CUR(comppadlist, 1);
 
-	PAD_SET_CUR(comppadlist, 1);
-	$PL_runops->();
+		$PL_runops->();
 
-	FREETMPS;
-	LEAVE;
+		FREETMPS;
+		LEAVE;
+	}
 
 	exit;
 }

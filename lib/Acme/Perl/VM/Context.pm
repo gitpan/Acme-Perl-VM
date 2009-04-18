@@ -123,11 +123,11 @@ has resetsp => (
 	is  => 'rw',
 	isa => 'Int',
 );
-has my_op => (
+has myop => (
 	is  => 'rw',
 	isa => 'B::LOOP',
 );
-has next_op => (
+has nextop => (
 	is  => 'rw',
 	isa => 'B::OP',
 );
@@ -143,7 +143,7 @@ if(USE_ITHREADS){
 else{
 	has itervar => (
 		is => 'rw',
-		isa => 'Ref[B::SV]',
+		isa => 'Ref',
 	);
 }
 has itersave => (

@@ -29,15 +29,12 @@ sub pp_nextstate{
 
 sub pp_pushmark{
 	PUSHMARK;
-
 	return $PL_op->next;
 }
 
 sub pp_const{
 	my $sv = is_not_null($PL_op->sv) ? $PL_op->sv : PAD_SV($PL_op->targ);
-
 	PUSH($sv);
-
 	return $PL_op->next;
 }
 
@@ -46,48 +43,203 @@ sub pp_gv{
 	return $PL_op->next;
 }
 
-sub pp_rv2av{
-	my $sv = TOP;
-
-	if($sv->ROK){
-		not_implemented 'pp_rv2av for RV';
-	}
-
-	if($sv->isa('B::AV')){
-		if($PL_op->flags & OPf_REF){
-			SET($sv);
-			return $PL_op->next;
-		}
-		elsif(LVRET){
-			not_implemented 'lvalue';
-		}
+sub pp_gvsv{
+	if($PL_op->private & OPpLVAL_INTRO){
+		PUSH(save_scalar(GVOP_gv($PL_op)));
 	}
 	else{
-		$sv->isa('B::GV') or apvm_die 'Not a GLOB';
-		$sv = $sv->AV;
+		PUSH(GVOP_gv($PL_op)->SV);
+	}
+	return $PL_op->next;
+}
 
-		if($PL_op->flags & OPf_REF){
-			SET($sv);
-			return $PL_op->next;
-		}
-		elsif(LVRET){
-			not_implemented 'lvalue';
-		}
+sub _do_kv{
+	my $hv = POP;
+
+	if($hv->class ne 'HV'){
+		apvm_die 'panic: do_kv';
 	}
 
 	my $gimme = GIMME_V;
-	if($gimme == G_ARRAY){
-		POP;
 
-		foreach my $elem( @{$sv->object_2svref} ){
-			PUSH($elem);
-		}
+	if($gimme == G_VOID){
+		return $PL_op->next;
 	}
 	elsif($gimme == G_SCALAR){
-		SETval( $sv->FILL + 1 );
+
+		if($PL_op->flags & OPf_MOD || LVRET){
+			not_implemented 'lvalue ' . $PL_op->name;
+		}
+
+		my $num = keys %{ $hv->object_2svref };
+		PUSH( sv_2mortal(svref_2object(\$num)) );
+		return $PL_op->next;
+	}
+
+
+	my($dokeys, $dovalues);
+	if($PL_op->name eq 'keys'){
+		$dokeys = TRUE;
+	}
+	elsif($PL_op->name eq 'values'){
+		$dovalues = TRUE;
+	}
+	else{
+		$dokeys = $dovalues = TRUE;
+	}
+
+	my $hash_ref = $hv->object_2svref;
+	while(my $k = each %{$hash_ref}){
+		PUSH( sv_2mortal( svref_2object(\$k) ) ) if $dokeys;
+		PUSH( svref_2object(\$hash_ref->{$k}) )  if $dovalues;
+	}
+	return $PL_op->next;
+}
+
+sub pp_rv2gv{
+	my $sv = TOP;
+
+	if($sv->ROK){
+		$sv = $sv->RV;
+	}
+
+	if($sv->class ne 'GV'){
+		apvm_die 'Not a GLOB reference';
+	}
+
+	if($PL_op->private & OPpLVAL_INTRO){
+		not_implemented 'pp_rv2gv for OPpLVAL_INTRO';
+	}
+
+	SET($sv);
+	return $PL_op->next;
+}
+
+sub pp_rv2sv{
+	my $sv = TOP;
+	my $gv;
+
+	if($sv->ROK){
+		my %not_a_scalar;
+		@not_a_scalar{qw(AV HV CV FM IO)} = ();
+
+		if(exists $not_a_scalar{ $sv->class }){
+			apvm_die 'Not a SCALAR reference';
+		}
+	}
+	else{
+		if($sv->class ne 'GV'){
+			not_implemented 'rv2xv for soft references';
+		}
+		$gv = $sv;
+	}
+
+	if($PL_op->flags & OPf_MOD){
+		if($PL_op->op_private & OPpLVAL_INTRO){
+			if($PL_op->first->name eq 'null'){
+				$sv = save_scalar(TOP);
+			}
+			else{
+				$sv = save_scalar($gv);
+			}
+		}
+		elsif($PL_op->private & OPpDEREF){
+			vivify_ref($sv, $PL_op->private & OPpDEREF);
+		}
+	}
+	SET($sv);
+	return $PL_op->next;
+}
+
+sub pp_rv2av{
+	my $sv    = TOP;
+	my $name;
+	my $class;
+	my $save;
+
+	if($PL_op->name eq 'rv2av'){
+		$name  = 'an ARRAY';
+		$class = 'AV';
+		$save  = \&save_ary;
+	}
+	else{
+		$name  = 'a HASH';
+		$class = 'HV';
+		$save  = \&save_hash;
+	}
+	my $gimme = GIMME_V;
+
+	if($sv->ROK){
+		$sv = $sv->RV;
+
+		if($sv->class ne $class){
+			apvm_die "Not $name reference";
+		}
+		if($PL_op->flags & OPf_REF){
+			SET($sv);
+			return $PL_op->next;
+		}
+		elsif(LVRET){
+			not_implemented 'lvalue';
+		}
+		elsif($PL_op->flags & OPf_MOD
+				&& $PL_op->private & OPpLVAL_INTRO){
+			apvm_die q{Can't localize through a reference};
+		}
+	}
+	else{
+		if($sv->class eq $class){
+			if($PL_op->flags & OPf_REF){
+				SET($sv);
+				return $PL_op->next;
+			}
+			elsif(LVRET){
+				not_implemented 'lvalue';
+			}
+		}
+		else{
+			if($sv->class ne 'GV'){
+				not_implemented 'symbolic reference';
+			}
+			my $gv = $sv;
+			$sv = $gv->$class();
+
+			if($PL_op->private & OPpLVAL_INTRO){
+				$sv = $save->($gv);
+			}
+
+			if($PL_op->flags & OPf_REF){
+				SET($sv);
+				return $PL_op->next;
+			}
+			elsif(LVRET){
+				not_implemented 'lvalue';
+			}
+		}
+	}
+
+	if($class eq 'AV'){ # rv2av
+		if($gimme == G_ARRAY){
+			POP;
+			PUSH( $sv->ARRAY );
+		}
+		elsif($gimme == G_SCALAR){
+			SETval( $sv->FILL + 1 );
+		}
+	}
+	else{ # rv2hv
+		if($gimme == G_ARRAY){
+			return &_do_kv;
+		}
+		elsif($gimme == G_SCALAR){
+			SET(hv_scalar($sv));
+		}
 	}
 
 	return $PL_op->next;
+}
+sub pp_rv2hv{
+	goto &pp_rv2av;
 }
 
 sub pp_padsv{
@@ -104,6 +256,97 @@ sub pp_padsv{
 	return $PL_op->next;
 }
 
+sub pp_padav{
+	my $targ = GET_TARGET;
+
+	if($PL_op->private & OPpLVAL_INTRO){
+		if(!($PL_op->private & OPpPAD_STATE)){
+			SAVECLEARSV($targ);
+		}
+	}
+
+	if($PL_op->flags & OPf_REF){
+		PUSH($targ);
+		return $PL_op->next;;
+	}
+	elsif(LVRET){
+		not_implemented 'lvalue';
+	}
+
+	my $gimme = GIMME_V;
+	if($gimme == G_ARRAY){
+		PUSH( $targ->ARRAY );
+	}
+	elsif($gimme == G_SCALAR){
+		my $sv = sv_newmortal();
+		$sv->setval($targ->FILL + 1);
+		PUSH($sv);
+	}
+
+	return $PL_op->next;
+}
+
+sub pp_padhv{
+	my $targ = GET_TARGET;
+
+	if($PL_op->private & OPpLVAL_INTRO){
+		if(!($PL_op->private & OPpPAD_STATE)){
+			SAVECLEARSV($targ);
+		}
+	}
+
+	PUSH($targ);
+
+	if($PL_op->flags & OPf_REF){
+		return $PL_op->next;
+	}
+	elsif(LVRET){
+		not_implemented 'lvalue';
+	}
+
+	my $gimme = GIMME_V;
+	if($gimme == G_ARRAY){
+		return &_do_kv;
+	}
+	elsif($gimme == G_SCALAR){
+		SET( hv_scalar($targ) );
+	}
+
+	return $PL_op->next;;
+}
+
+sub _refto{
+	my($sv) = @_;
+
+	if($sv->class eq 'PVLV'){
+		not_implemented 'PVLV';
+	}
+	my $rv = $sv->object_2svref;
+	return sv_2mortal( svref_2object(\$rv) );
+}
+
+sub pp_srefgen{
+	$PL_stack[-1] = _refto($PL_stack[-1]);
+	return $PL_op->next;
+}
+sub pp_refgen{
+	my $mark = POPMARK;
+	if(GIMME_V == G_ARRAY){
+		while(++$mark <= $#PL_stack){
+			$PL_stack[$mark] = _refto($PL_stack[$mark]);
+		}
+	}
+	else{
+		if(++$mark <= $#PL_stack){
+			$PL_stack[$mark] = _refto($PL_stack[-1]);
+		}
+		else{
+			$PL_stack[$mark] = _refto(sv_undef);
+		}
+		$#PL_stack = $mark;
+	}
+	return $PL_op->next;
+}
 
 sub pp_list{
 	my $mark = POPMARK;
@@ -166,6 +409,11 @@ sub pp_entersub{
 	my $sv = POP;
 	my $cv = $sv->toCV();
 
+	if(is_null($cv)){
+		apvm_die 'Undefined subroutine &%s::%s called',
+			$sv->STASH->NAME, $sv->NAME;
+	}
+
 	my $hasargs = ($PL_op->flags & OPf_STACKED) != 0;
 
 	ENTER;
@@ -193,7 +441,7 @@ sub pp_entersub{
 		*_ = $av->object_2svref;
 		$cx->CURPAD_SAVE();
 		$cx->argarray($av);
-		@_ = mark_list($mark);
+		@_ = map{ ${$_->object_2svref} }mark_list($mark);
 	}
 
 	return $cv->START;
@@ -335,6 +583,7 @@ sub pp_leave{
 	return $PL_op->next;
 }
 
+
 sub pp_enterloop{
 
 	ENTER;
@@ -397,6 +646,108 @@ sub pp_unstack{
 	return $PL_op->next;
 }
 
+sub _dopoptoloop{
+	my $cxix;
+	if($PL_op->flags & OPf_SPECIAL){
+		$cxix = dopoptoloop($#PL_cxstack);
+		if($cxix < 0){
+			apvm_die q{Can't "%s" outside a loop block}, $PL_op->name
+		}
+	}
+	else{
+		$cxix = dopoptolabel($PL_op->pv);
+		if($cxix < 0){
+			apvm_die q{Label not found for "%s %s"}, $PL_op->name, $PL_op->pv;
+		}
+	}
+
+	return $cxix;
+}
+
+sub pp_last{
+	my $cxix = _dopoptoloop();
+	if($cxix < $#PL_cxstack){
+		dounwind($cxix);
+	}
+
+	my $cx   = POPBLOCK;
+	my $newsp= $cx->oldsp;
+	my $mark = $newsp;
+	my $type = $cx->type;
+	my $nextop;
+
+	if($type eq 'LOOP'){
+		$newsp  = $cx->resetsp;
+		$nextop = $cx->myop->lastop->next;
+	}
+	elsif($type eq 'SUB'){
+		$nextop = $cx->retop;
+	}
+	else{
+		not_implemented "last($type)";
+	}
+
+	my $gimme = $cx->gimme;
+	if($gimme == G_SCALAR){
+		if($mark < $#PL_stack){
+			$PL_stack[++$newsp] = sv_mortalcopy($PL_stack[-1]);
+		}
+		else{
+			$PL_stack[++$newsp] = sv_undef;
+		}
+	}
+	elsif($gimme == G_SCALAR){
+		while($mark < $#PL_stack){
+			$PL_stack[++$newsp] = sv_mortalcopy($PL_stack[-1]);
+		}
+	}
+	$#PL_stack = $newsp;
+	LEAVE;
+
+	if($type eq 'LOOP'){
+		POPLOOP($cx);
+		LEAVE;
+	}
+	elsif($type eq 'SUB'){
+		POPSUB($cx);
+	}
+	return $nextop;
+}
+
+sub pp_next{
+	my $cxix = _dopoptoloop();
+	if($cxix < $#PL_cxstack){
+		dounwind($cxix);
+	}
+
+	my $cx    = TOPBLOCK;
+	LEAVE_SCOPE($PL_scopestack[-1]);
+	$PL_curcop = $cx->oldcop;
+	return $cx->nextop;
+}
+sub pp_redo{
+	my $cxix = _dopoptoloop();
+
+	my $op = $PL_cxstack[$cxix]->myop->redoop;
+
+	if($op->name eq 'enter'){
+		$cxix++;
+		$op = $op->next;
+	}
+
+	if($cxix < $#PL_cxstack){
+		dounwind($cxix);
+	}
+
+	my $cx = TOPBLOCK;
+	LEAVE_SCOPE($PL_scopestack[-2]);
+	FREETMPS;
+
+	$PL_curcop = $cx->oldcop;
+	return $op;
+}
+
+
 sub pp_sassign{
 	my $right = POP;
 	my $left  = TOP;
@@ -404,7 +755,6 @@ sub pp_sassign{
 	if($PL_op->private & OPpASSIGN_BACKWARDS){
 		($left, $right) = ($right, $left);
 	}
-
 	$right->setsv($left);
 	SET($right);
 	return $PL_op->next;
@@ -427,17 +777,17 @@ sub pp_aassign{
 
 	my $ary_ref;
 	my $hash_ref;
-	my $duplicates = 0;
 
 	my $l_elem = $first_l_elem;
 	my $r_elem = $first_r_elem;
 
 	my $gimme = GIMME_V;
+	my $hv;
 
 	while($l_elem <= $last_l_elem){
 		my $sv = $PL_stack[$l_elem++];
 
-		if($sv->isa('B::AV')){
+		if($sv->class eq 'AV'){
 			$ary_ref = $sv->object_2svref;
 			@{ $ary_ref } = ();
 			while($r_elem <= $last_r_elem){
@@ -445,8 +795,22 @@ sub pp_aassign{
 				$PL_stack[$r_elem++] = svref_2object(\$ary_ref->[-1]);
 			}
 		}
-		elsif($sv->isa('B::HV')){
-			not_implemented 'pp_aassign for HV';
+		elsif($sv->class eq 'HV'){
+			$hv = $sv;
+			$hash_ref = $sv->object_2svref;
+			%{$hash_ref} = ();
+
+			while($r_elem < $last_r_elem){
+				my $key = $PL_stack[$r_elem++];
+				my $val = $PL_stack[$r_elem++];
+
+				$sv->store_ent($key, is_not_null($val) ? $val : sv_undef);
+			}
+
+			if($r_elem == $last_r_elem){
+				apvm_warn 'Odd number of elements in hash assignment';
+				$r_elem++;
+			}
 		}
 		else{
 			if($$sv == ${sv_undef()}){ # (undef) = (...)
@@ -478,7 +842,10 @@ sub pp_aassign{
 			$#PL_stack = $last_r_elem;
 		}
 		elsif($hash_ref){
-			not_implemented 'pp_aassign for HV';
+			$#PL_stack = $first_r_elem;
+			SET($hv);
+
+			return &_do_kv;
 		}
 		else{
 			$#PL_stack = $first_r_elem + ($last_l_elem - $first_l_elem);
@@ -487,6 +854,7 @@ sub pp_aassign{
 
 	return $PL_op->next;
 }
+
 sub pp_cond_expr{
 	if(SvTRUE(POP)){
 		return $PL_op->other;
@@ -495,15 +863,54 @@ sub pp_cond_expr{
 		return $PL_op->next;
 	}
 }
-
 sub pp_and{
-	if(SvTRUE(TOP)){
+	if(!SvTRUE(TOP)){
+		return $PL_op->next;
+	}
+	else{
+		apvm_die 'panic: pp_and (%s)', $PL_op->name if $PL_op->name ne 'and';
+
 		pop @PL_stack;
 		return $PL_op->other;
 	}
-	else{
+}
+
+sub pp_or{
+	if(SvTRUE(TOP)){
 		return $PL_op->next;
 	}
+	else{
+		apvm_die 'panic: pp_or (%s)', $PL_op->name if $PL_op->name ne 'or';
+
+		pop @PL_stack;
+		return $PL_op->other;
+	}
+}
+
+sub pp_defined{
+	if($PL_op->name ne 'defined'){ # dor/dorassign
+		not_implemented;
+	}
+
+	my $sv   = POP;
+	my $type = $sv->class;
+	my $ref  = $sv->object_2svref;
+
+	my $defined;
+	if($type eq 'AV'){
+		$defined = defined @{$ref};
+	}
+	elsif($type eq 'HV'){
+		$defined = defined %{$ref};
+	}
+	elsif($type eq 'CV'){
+		$defined = defined &{$ref};
+	}
+	else{
+		$defined = defined ${$ref};
+	}
+	PUSH($defined ? sv_yes : sv_no);
+	return $PL_op->next;
 }
 
 sub pp_range{
@@ -524,12 +931,63 @@ sub pp_preinc{
 
 	return $PL_op->next;
 }
+sub pp_postinc{
+	my $targ = GET_TARGET;
+	my $sv   = TOP;
+	my $ref  = $sv->object_2svref;
 
+	if(defined ${$sv}){
+		$targ->setsv($sv);
+	}
+	else{
+		$targ->setval(0);
+	}
+	${$ref}++;
+
+	SET($targ);
+	return $PL_op->next;
+}
+
+sub pp_eq{
+	my $right = POP;
+	my $left  = TOP;
+
+	SET(SvNV($left) == SvNV($right) ? sv_yes : sv_no);
+	return $PL_op->next;
+}
+sub pp_ne{
+	my $right = POP;
+	my $left  = TOP;
+
+	SET(SvNV($left) != SvNV($right) ? sv_yes : sv_no);
+	return $PL_op->next;
+}
 sub pp_lt{
 	my $right = POP;
 	my $left  = TOP;
 
 	SET(SvNV($left) < SvNV($right) ? sv_yes : sv_no);
+	return $PL_op->next;
+}
+sub pp_le{
+	my $right = POP;
+	my $left  = TOP;
+
+	SET(SvNV($left) <= SvNV($right) ? sv_yes : sv_no);
+	return $PL_op->next;
+}
+sub pp_gt{
+	my $right = POP;
+	my $left  = TOP;
+
+	SET(SvNV($left) > SvNV($right) ? sv_yes : sv_no);
+	return $PL_op->next;
+}
+sub pp_ge{
+	my $right = POP;
+	my $left  = TOP;
+
+	SET(SvNV($left) >= SvNV($right) ? sv_yes : sv_no);
 	return $PL_op->next;
 }
 
@@ -551,6 +1009,30 @@ sub pp_concat{
 	return $PL_op->next;
 }
 
+sub pp_readline{
+	$PL_last_in_gv = POP;
+	if($PL_last_in_gv->class ne 'GV'){
+		PUSH($PL_last_in_gv);
+		&pp_rv2gv;
+		$PL_last_in_gv = POP;
+	}
+
+	# do_readline
+	my $targ    = GET_TARGETSTACKED;
+	my $istream = $PL_last_in_gv->object_2svref;
+
+	my $gimme = GIMME_V;
+	if($gimme == G_ARRAY){
+		PUSH(map{ sv_2mortal(B::svref_2object(\$_)) } readline $istream);
+	}
+	else{
+		$targ->setval(scalar readline $istream);
+		PUSH($targ);
+	}
+
+	return $PL_op->next;
+}
+
 sub pp_print{
 	my $mark     = POPMARK;
 	my $origmark = $mark;
@@ -562,36 +1044,53 @@ sub pp_print{
 	PUSH( $ret ? sv_yes : sv_no );
 	return $PL_op->next;
 }
+sub pp_say{
+	my $mark     = POPMARK;
+	my $origmark = $mark;
+	my $gv   = ($PL_op->flags & OPf_STACKED) ? $PL_stack[++$mark]->object_2svref : defoutgv;
+
+	local $\ = "\n";
+	my $ret  = print {$gv} map{ SvPV($_) } mark_list($mark);
+
+	$#PL_stack = $origmark;
+	PUSH( $ret ? sv_yes : sv_no );
+	return $PL_op->next;
+}
 
 sub pp_aelemfast{
 	my $av   = $PL_op->flags & OPf_SPECIAL ? PAD_SV($PL_op->targ) : GVOP_gv($PL_op)->AV;
-	my $lval = $PL_op->flags & OPf_MOD;
+	my $lval = $PL_op->flags & OPf_MOD || LVRET;
 
-	my $sv   = $av->fetch($PL_op->private, $lval);
-	PUSH( is_not_null($sv) ? $sv : sv_undef );
-
+	PUSH( B::svref_2object(\$av->object_2svref->[$PL_op->private]) );
 	return $PL_op->next;
 }
 
 sub pp_aelem{
 	my $elemsv = POP;
-	my $av     = POP;
-	my $lval  = $PL_op->flags & OPf_MOD;
+	my $av     = TOP;
+	my $lval  = $PL_op->flags & OPf_MOD || LVRET;
 
-	my $sv = $av->fetch(SvNV($elemsv), $lval);
-	PUSH( is_not_null($sv) ? $sv : sv_undef );
+	if($elemsv->ROK){
+		apvm_warn q{Use of reference %s as array index}, $elemsv->object_2svref;
+	}
+
+	SET( B::svref_2object(\$av->object_2svref->[SvIV($elemsv)]) );
 	return $PL_op->next;
 }
 
 sub pp_helem{
 	my $keysv = POP;
 	my $hv    = TOP;
-	my $lval  = $PL_op->flags & OPf_MOD;
+	my $lval  = $PL_op->flags & OPf_MOD || LVRET;
 
-	my $sv = $hv->fetch(SvPV($keysv), $lval);
-	PUSH( is_not_null($sv) ? $sv : sv_undef );
-
+	SET( B::svref_2object(\$hv->object_2svref->{SvPV($keysv)}) );
 	return $PL_op->next;
+}
+sub pp_keys{
+	return &_do_kv;
+}
+sub pp_values{
+	return &_do_kv;
 }
 
 sub pp_undef{
@@ -604,6 +1103,11 @@ sub pp_undef{
 }
 
 sub pp_scalar{
+	return $PL_op->next;
+}
+
+sub pp_not{
+	SET( !SvTRUE(TOP) ? sv_yes : sv_no );
 	return $PL_op->next;
 }
 
@@ -632,9 +1136,11 @@ Implemented ppcodes:
 
 =item pp_gv
 
-=item pp_rv2av
-
 =item pp_padsv
+
+=item pp_padav
+
+=item pp_rv2av
 
 =item pp_list
 
@@ -670,6 +1176,8 @@ Implemented ppcodes:
 
 =item pp_and
 
+=item pp_or
+
 =item pp_range
 
 =item pp_preinc
@@ -684,9 +1192,15 @@ Implemented ppcodes:
 
 =item pp_aelemfast
 
+=item pp_aelem
+
+=item pp_helem
+
 =item pp_undef
 
 =item pp_scalar
+
+=item pp_not
 
 =back
 
