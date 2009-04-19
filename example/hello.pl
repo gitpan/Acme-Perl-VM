@@ -1,8 +1,6 @@
 #!perl -w
-
 use strict;
-use Acme::Perl::VM;
+use Acme::Perl::VM::Run;
 
-run_block {
-	print "Hello, world!\n";
-};
+my $x = 'APVM';
+print "Hello, $x world!\n";

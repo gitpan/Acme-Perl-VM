@@ -5,26 +5,25 @@ use warnings;
 use Acme::Perl::VM qw(:perl_h);
 use B qw(main_start comppadlist);
 
-# not yet implemented
-
 no warnings 'void';
 INIT{
-	if(is_not_null(main_start)){
-		ENTER;
-		SAVETMPS;
+	if(!APVM_DUMMY){
+		if(is_not_null(main_start)){
+			ENTER;
+			SAVETMPS;
 
-		$PL_curcop ||= bless \do{ my $addr = 0 }, 'B::COP'; # dummy cop
+			$PL_curcop ||= bless \do{ my $addr = 0 }, 'B::COP'; # dummy cop
 
-		$PL_op = main_start;
-		PAD_SET_CUR(comppadlist, 1);
+			$PL_op = main_start;
+			PAD_SET_CUR(comppadlist, 1);
 
-		$PL_runops->();
+			$PL_runops->();
 
-		FREETMPS;
-		LEAVE;
+			FREETMPS;
+			LEAVE;
+		}
+		exit;
 	}
-
-	exit;
 }
 
 1;

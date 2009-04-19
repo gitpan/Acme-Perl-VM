@@ -33,6 +33,16 @@ use B qw(class);
 
 sub dump{
 	my($obj) = @_;
+	require Devel::Peek;
+	Devel::Peek::Dump($obj->object_2svref);
+	return;
+}
+
+package
+	B::OP;
+
+sub dump{
+	my($obj) = @_;
 	require B::Debug;
 
 	$obj->debug;
@@ -66,6 +76,8 @@ sub setval{
 
 sub STASH{ undef }
 
+sub POK{ 0 }
+
 package
 	B::SV;
 
@@ -93,7 +105,8 @@ sub setval{
 
 sub clear{
 	my($sv) = @_;
-	$sv->setsv(B::sv_undef);
+
+	${$sv->object_2svref} = undef;
 	return;
 }
 
@@ -109,10 +122,18 @@ package
 
 sub toCV{ $_[0] }
 
+sub clear{
+	Carp::croak('Cannot clear a CV');
+}
+
 package
 	B::GV;
 
 sub toCV{ $_[0]->CV }
+
+sub clear{
+	Carp::croak('Cannot clear a CV');
+}
 
 package
 	B::AV;

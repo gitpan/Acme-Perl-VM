@@ -1,10 +1,12 @@
 Changes
+example/for.pl
+example/foreach.pl
 example/funcall.pl
+example/funcall_run.pl
 example/hello.pl
-example/loop.pl
 example/methcall.pl
 example/quine.pl
-example/run.pl
+example/trace.pl
 example/warn.pl
 inc/Module/Install.pm
 inc/Module/Install/AuthorTests.pm
@@ -36,6 +38,8 @@ t/08_array.t
 t/09_hash.t
 t/10_rv2xv.t
 t/11_readline.t
+t/12_anon.t
+t/13_foreach.t
 xt/01_podspell.t
 xt/02_pod.t
 xt/03_pod-coverage.t

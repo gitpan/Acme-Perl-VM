@@ -1,11 +1,11 @@
 #!perl -w
 
 use strict;
-use Test::More tests => 17;
+use Test::More tests => 22;
 
 use Acme::Perl::VM;
 use Acme::Perl::VM qw(:perl_h);
-
+use B qw(svref_2object);
 
 our $x = 10;
 sub inc_global{
@@ -23,13 +23,38 @@ sub inc_local{
 is_deeply [run_block{ our $x = 10 }], [10];
 is_deeply [run_block{ our @x = 20 }], [20];
 
-is_deeply [run_block{ *STDIN }],      [*STDIN];
+is_deeply [run_block{  *STDIN }], [ *STDIN];
+is_deeply [run_block{ \*STDIN }], [\*STDIN];
+
+#is_deeply [run_block{ \&ok }];
 
 is_deeply [inc_global()], [11];
 is_deeply [inc_global()], [12];
 
 is_deeply [inc_local()], [1];
 is_deeply [inc_local()], [1];
+
+$x = 10;
+is scalar(run_block{
+	local $x = 100;
+	$x++;
+	return $x;
+}), 101;
+is $x, 10;
+
+{
+	local $TODO = 'mg locaization';
+
+	local $|;
+	my $mg = run_block{
+		local $| = 42;
+		return \$|;
+	};
+
+	ok svref_2object($mg)->MAGICAL, 'magic vars';
+
+	ok !$| or diag '$| = '.$|;
+}
 
 our @a = (1);
 $x = run_block{

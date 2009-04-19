@@ -12,6 +12,7 @@ __PACKAGE__->meta->make_immutable();
 
 package Acme::Perl::VM::Context::BLOCK;
 use Mouse;
+use Acme::Perl::VM qw($PL_comppad);
 
 extends 'Acme::Perl::VM::Context';
 
@@ -36,12 +37,24 @@ has oldscopesp => (
 	isa => 'Int',
 );
 
+sub CURPAD_SAVE{
+	my($cx) = @_;
+
+	$cx->oldcomppad($PL_comppad);
+	return;
+}
+
+sub CURPAD_SV{
+	my($cx, $ix) = @_;
+
+	return $cx->oldcomppad->ARRAYelt($ix);
+}
+
 
 __PACKAGE__->meta->make_immutable();
 
 package Acme::Perl::VM::Context::SUB;
 use Mouse;
-use Acme::Perl::VM qw($PL_comppad);
 extends 'Acme::Perl::VM::Context::BLOCK';
 
 has cv => (
@@ -81,20 +94,6 @@ has lval => (
 	isa => 'Bool',
 );
 
-sub CURPAD_SAVE{
-	my($cx) = @_;
-
-	$cx->oldcomppad($PL_comppad);
-	return;
-}
-
-sub CURPAD_SV{
-	my($cx, $ix) = @_;
-
-	return$cx->oldcomppad->ARRAYelt($ix);
-}
-
-
 __PACKAGE__->meta->make_immutable();
 
 package Acme::Perl::VM::Context::EVAL;
@@ -105,15 +104,7 @@ __PACKAGE__->meta->make_immutable();
 
 package Acme::Perl::VM::Context::LOOP;
 use Mouse;
-use Acme::Perl::VM qw(is_not_null);
-use Acme::Perl::VM::B qw(USE_ITHREADS NULL);
-
 extends 'Acme::Perl::VM::Context::BLOCK';
-
-has padloop => (
-	is  => 'rw',
-	isa => 'Bool',
-);
 
 has label => (
 	is  => 'rw',
@@ -131,6 +122,26 @@ has nextop => (
 	is  => 'rw',
 	isa => 'B::OP',
 );
+
+sub ITERVAR(){ undef }
+
+__PACKAGE__->meta->make_immutable();
+
+package Acme::Perl::VM::Context::FOREACH;
+use Mouse;
+use Acme::Perl::VM::B qw(USE_ITHREADS);
+extends 'Acme::Perl::VM::Context::LOOP';
+
+has padvar => (
+	is  => 'rw',
+	isa => 'Bool',
+
+);
+has for_def => (
+	is => 'rw',
+	isa => 'Bool',
+);
+
 if(USE_ITHREADS){
 	has iterdata => (
 		is => 'rw',
@@ -143,20 +154,17 @@ if(USE_ITHREADS){
 else{
 	has itervar => (
 		is => 'rw',
-		isa => 'Ref',
 	);
 }
+
 has itersave => (
 	is => 'rw',
-	isa => 'Maybe[B::SV]',
 );
 has iterlval => (
 	is  => 'rw',
-	isa => 'Maybe[B::SV]',
 );
 has iterary => (
 	is  => 'rw',
-	isa => 'Maybe[B::SV]',
 );
 has iterix => (
 	is  => 'rw',
@@ -167,15 +175,18 @@ has itermax => (
 	isa => 'Int',
 );
 
+sub type(){ 'LOOP' } # this is a LOOP
+
+
 sub ITERVAR{
 	my($cx) = @_;
 	if(USE_ITHREADS){
-		my $itervar = $cx->iterdata
-			? $cx->padloop
-				? \$cx->CURPAD_SV($cx->iterdata)
-				: \$cx->iterdata->SV
-			: NULL;
-		return is_not_null($itervar) ? $itervar : undef;
+		if($cx->padvar){
+			return $cx->CURPAD_SV($cx->iterdata);
+		}
+		else{
+			return $cx->iterdata->SV;
+		}
 	}
 	else{
 		return $cx->itervar;
@@ -185,16 +196,11 @@ sub ITERDATA_SET{
 	my($cx, $idata) = @_;
 	if(USE_ITHREADS){
 		$cx->CURPAD_SAVE();
-		if(is_not_null($idata)){
-			$cx->iterdata($idata);
-		}
+		$cx->iterdata($idata);
 	}
 	else{
-		if($idata){
-			$cx->itervar($idata);
-		}
+		$cx->itervar($idata);
 	}
-
 	$cx->itersave($cx->ITERVAR);
 }
 

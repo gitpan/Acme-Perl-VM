@@ -1,5 +1,9 @@
 Revision history for Perl extension Acme::Perl::VM
 
+0.0.2
+	- release for Shibuya.pm#11
+	- improve trace mode (APVM_DEBUG=trace)
+
 0.0.1_03 Fri Apr 17 23:33:58 2009
 	- fix pp_entersub
 	- add a number of ppcodes and tests
