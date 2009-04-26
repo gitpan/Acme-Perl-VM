@@ -1,11 +1,13 @@
 package Acme::Perl::VM::PP;
 use strict;
+use warnings;
 
 use Acme::Perl::VM qw(:perl_h);
 use Acme::Perl::VM::B;
 
+
 #NOTE:
-#          XS  APVM
+#        perl  APVM
 #
 #         dSP  (nothing)
 #          SP  $#PL_stack
@@ -68,7 +70,7 @@ sub _do_kv{
 	elsif($gimme == G_SCALAR){
 
 		if($PL_op->flags & OPf_MOD || LVRET){
-			not_implemented 'lvalue ' . $PL_op->name;
+			not_implemented $PL_op->name . ' for lvalue';
 		}
 
 		my $num = keys %{ $hv->object_2svref };
@@ -108,7 +110,7 @@ sub pp_rv2gv{
 	}
 
 	if($PL_op->private & OPpLVAL_INTRO){
-		not_implemented 'pp_rv2gv for OPpLVAL_INTRO';
+		not_implemented 'rv2gv for OPpLVAL_INTRO';
 	}
 
 	SET($sv);
@@ -120,10 +122,7 @@ sub pp_rv2sv{
 	my $gv;
 
 	if($sv->ROK){
-		my %not_a_scalar;
-		@not_a_scalar{qw(AV HV CV FM IO)} = ();
-
-		if(exists $not_a_scalar{ $sv->class }){
+		if(!is_scalar($sv)){
 			apvm_die 'Not a SCALAR reference';
 		}
 	}
@@ -180,7 +179,7 @@ sub pp_rv2av{
 			return $PL_op->next;
 		}
 		elsif(LVRET){
-			not_implemented 'lvalue';
+			not_implemented 'rv2av for lvalue';
 		}
 		elsif($PL_op->flags & OPf_MOD
 				&& $PL_op->private & OPpLVAL_INTRO){
@@ -194,18 +193,19 @@ sub pp_rv2av{
 				return $PL_op->next;
 			}
 			elsif(LVRET){
-				not_implemented 'lvalue';
+				not_implemented 'rv2av for lvalue';
 			}
 		}
 		else{
 			if($sv->class ne 'GV'){
-				not_implemented 'symbolic reference';
+				not_implemented 'rv2av for symbolic reference';
 			}
-			my $gv = $sv;
-			$sv = $gv->$class();
 
 			if($PL_op->private & OPpLVAL_INTRO){
-				$sv = $save->($gv);
+				$sv = $save->($sv);
+			}
+			else{
+				$sv = $sv->$class();
 			}
 
 			if($PL_op->flags & OPf_REF){
@@ -213,7 +213,7 @@ sub pp_rv2av{
 				return $PL_op->next;
 			}
 			elsif(LVRET){
-				not_implemented 'lvalue';
+				not_implemented 'rv2av for lvalue';
 			}
 		}
 	}
@@ -247,10 +247,8 @@ sub pp_padsv{
 	PUSH($targ);
 
 	if($PL_op->flags & OPf_MOD){
-		if($PL_op->private & OPpLVAL_INTRO){
-			if(!($PL_op->private & OPpPAD_STATE)){
-				SAVECLEARSV($targ);
-			}
+		if(($PL_op->private & (OPpLVAL_INTRO|OPpPAD_STATE)) == OPpLVAL_INTRO){
+			SAVECLEARSV($targ);
 		}
 	}
 	return $PL_op->next;
@@ -259,18 +257,15 @@ sub pp_padsv{
 sub pp_padav{
 	my $targ = GET_TARGET;
 
-	if($PL_op->private & OPpLVAL_INTRO){
-		if(!($PL_op->private & OPpPAD_STATE)){
+	if(($PL_op->private & (OPpLVAL_INTRO|OPpPAD_STATE)) == OPpLVAL_INTRO){
 			SAVECLEARSV($targ);
-		}
 	}
-
 	if($PL_op->flags & OPf_REF){
 		PUSH($targ);
 		return $PL_op->next;;
 	}
 	elsif(LVRET){
-		not_implemented 'lvalue';
+		not_implemented 'padav for lvalue';
 	}
 
 	my $gimme = GIMME_V;
@@ -289,10 +284,8 @@ sub pp_padav{
 sub pp_padhv{
 	my $targ = GET_TARGET;
 
-	if($PL_op->private & OPpLVAL_INTRO){
-		if(!($PL_op->private & OPpPAD_STATE)){
-			SAVECLEARSV($targ);
-		}
+	if(($PL_op->private & (OPpLVAL_INTRO|OPpPAD_STATE)) == OPpLVAL_INTRO){
+		SAVECLEARSV($targ);
 	}
 
 	PUSH($targ);
@@ -301,7 +294,7 @@ sub pp_padhv{
 		return $PL_op->next;
 	}
 	elsif(LVRET){
-		not_implemented 'lvalue';
+		not_implemented 'padhv for lvalue';
 	}
 
 	my $gimme = GIMME_V;
@@ -359,7 +352,7 @@ sub _refto{
 	my($sv) = @_;
 
 	if($sv->class eq 'PVLV'){
-		not_implemented 'PVLV';
+		not_implemented 'ref to PVLV';
 	}
 	my $rv = $sv->object_2svref;
 	return sv_2mortal( svref_2object(\$rv) );
@@ -455,7 +448,6 @@ sub pp_entersub{
 	if(is_null($cv)){
 		apvm_die 'Undefined subroutine %s called', gv_fullname($sv, '&');
 	}
-
 	my $hasargs = ($PL_op->flags & OPf_STACKED) != 0;
 
 	ENTER;
@@ -464,29 +456,50 @@ sub pp_entersub{
 	my $mark  = POPMARK;
 	my $gimme = GIMME_V;
 
-	PUSHBLOCK(SUB => $mark, $gimme);
-	my $cx = $PL_cxstack[-1];
+	if(!cv_external($cv)){
+		my $cx = PUSHBLOCK(SUB =>
+			oldsp => $mark,
+			gimme => $gimme,
 
-	PUSHSUB($cx,
-		cv      => $cv,
-		hasargs => $hasargs,
-	);
-	$cx->retop($PL_op->next);
+			cv      => $cv,
+			hasargs => $hasargs,
+			retop   => $PL_op->next,
+		);
 
-	#XXX: How to do {$cv->DEPTH++}?
-	PAD_SET_CUR($cv->PADLIST, $cv->DEPTH+1);
+		#XXX: How to do {$cv->DEPTH++}?
+		PAD_SET_CUR($cv->PADLIST, $cv->DEPTH+1);
 
-	if($hasargs){
-		my $av = PAD_SV(0);
+		if($hasargs){
+			my $av = PAD_SV(0);
 
-		$cx->savearray(\@_);
-		*_ = $av->object_2svref;
-		$cx->CURPAD_SAVE();
-		$cx->argarray($av);
-		@_ =  mark_list($mark);
+			$cx->savearray(\@_);
+			*_ = $av->object_2svref;
+			$cx->CURPAD_SAVE();
+			$cx->argarray($av);
+
+			#@_ = mark_list($mark);
+			av_assign($av, splice @PL_stack, $mark+1);
+		}
+
+		return $cv->START;
 	}
+	else{
+		my @args;
+		av_assign(svref_2object(\@args), splice @PL_stack, $mark+1);
 
-	return $cv->START;
+		if($gimme == G_SCALAR){
+			my $ret = $cv->object_2svref->(@args);
+			mPUSH(svref_2object(\$ret));
+		}
+		elsif($gimme == G_ARRAY){
+			my @ret = $cv->object_2svref->(@args);
+			mPUSH(map{ svref_2object(\$_) } @ret);
+		}
+		else{
+			$cv->object_2svref->(@args);
+		}
+		return $PL_op->next;
+	}
 }
 
 sub pp_leavesub{
@@ -509,6 +522,9 @@ sub pp_leavesub{
 		for(my $mark = $newsp + 1; $mark <= $#PL_stack; $mark++){
 			$PL_stack[$mark] = sv_mortalcopy($PL_stack[$mark]);
 		}
+	}
+	else{
+		$#PL_stack = $newsp;
 	}
 
 	LEAVE;
@@ -539,7 +555,7 @@ sub pp_return{
 		$retop   = $cx->retop;
 	}
 	else{
-		not_implemented 'pp_return for ' . $cx->type
+		not_implemented 'return for ' . $cx->type
 	}
 
 	my $newsp = $cx->oldsp;
@@ -583,7 +599,10 @@ sub pp_enter{
 	ENTER;
 	SAVETMPS;
 
-	PUSHBLOCK(BLOCK => $#PL_stack, $gimme);
+	PUSHBLOCK(BLOCK =>
+		oldsp => $#PL_stack,
+		gimme => $gimme
+	);
 
 	return $PL_op->next;
 }
@@ -632,9 +651,11 @@ sub pp_enterloop{
 	SAVETMPS;
 	ENTER;
 
-	PUSHBLOCK(LOOP => $#PL_stack, GIMME_V);
-	PUSHLOOP($PL_cxstack[-1],
-		sp => $#PL_stack,
+	PUSHBLOCK(LOOP => 
+		oldsp   => $#PL_stack,
+		gimme   => GIMME_V,
+
+		resetsp => $#PL_stack,
 	);
 
 	return $PL_op->next;
@@ -690,12 +711,13 @@ sub pp_enteriter{
 	if($PL_op->targ){
 		if(USE_ITHREADS){
 			#SAVEPADSV($PL_op->targ);
-			$iterdata = $PL_op->targ;
 			$padvar   = TRUE;
+			$iterdata = $PL_op->targ;
 		}
 		else{
 			SAVE($PL_curpad[$PL_op->targ]);
 			$sv = $PL_curpad[$PL_op->targ];
+			$iterdata = $sv;
 		}
 	}
 	else{
@@ -703,6 +725,9 @@ sub pp_enteriter{
 		$sv = save_scalar($gv);
 		if(USE_ITHREADS){
 			$iterdata = $gv;
+		}
+		else{
+			$iterdata = $sv;
 		}
 	}
 
@@ -712,24 +737,15 @@ sub pp_enteriter{
 
 	ENTER;
 
-	PUSHBLOCK(FOREACH => $#PL_stack, GIMME_V);
-	my $cx = $PL_cxstack[-1];
-	if(USE_ITHREADS){
-		PUSHLOOP($cx,
-			sp       => $mark,
-			iterdata => $iterdata,
-			padvar   => $padvar,
-			for_def  => $for_def,
-		);
-	}
-	else{
-		PUSHLOOP($cx,
-			sp       => $mark,
-			iterdata => $sv,
-			padvar   => $padvar,
-			for_def  => $for_def,
-		);
-	}
+	my $cx = PUSHBLOCK(FOREACH => 
+		oldsp => $#PL_stack,
+		gimme => GIMME_V,
+
+		resetsp  => $mark,
+		iterdata => $iterdata,
+		padvar   => $padvar,
+		for_def  => $for_def,
+	);
 
 	if($PL_op->flags & OPf_STACKED){
 		my $iterary = POP;
@@ -756,6 +772,10 @@ sub pp_enteriter{
 				$cx->iterix(-1);
 			}
 		}
+
+		# XXX: original code does not have this adjustment.
+		#      is it OK?
+		$cx->oldsp($#PL_stack);
 	}
 	else{
 		$cx->iterary(\@PL_stack);
@@ -777,7 +797,7 @@ sub pp_iter{
 
 	if(ref($iterary) ne 'ARRAY'){ # iterate range
 		if(my $cur = $cx->iterlval){
-			not_implemented 'string range';
+			not_implemented 'string range in foreach';
 		}
 
 		# integer increment
@@ -823,10 +843,9 @@ sub pp_lineseq{
 
 sub pp_unstack{
 	$#PL_stack = $PL_cxstack[-1]->oldsp;
-	FREETMPS;
 
-	my $oldsave = $PL_scopestack[-1];
-	LEAVE_SCOPE($oldsave);
+	FREETMPS;
+	LEAVE_SCOPE($PL_scopestack[-1]);
 
 	return $PL_op->next;
 }
@@ -997,7 +1016,7 @@ sub pp_aassign{
 				my $key = $PL_stack[$r_elem++];
 				my $val = $PL_stack[$r_elem++];
 
-				$sv->store_ent($key, is_not_null($val) ? $val : sv_undef);
+				$sv->store_ent($key, $val || sv_undef);
 			}
 
 			if($r_elem == $last_r_elem){
@@ -1063,7 +1082,7 @@ sub pp_and{
 	else{
 		apvm_die 'panic: pp_and (%s)', $PL_op->name if $PL_op->name ne 'and';
 
-		pop @PL_stack;
+		--$#PL_stack;
 		return $PL_op->other;
 	}
 }
@@ -1075,7 +1094,7 @@ sub pp_or{
 	else{
 		apvm_die 'panic: pp_or (%s)', $PL_op->name if $PL_op->name ne 'or';
 
-		pop @PL_stack;
+		--$#PL_stack;
 		return $PL_op->other;
 	}
 }
@@ -1119,6 +1138,42 @@ sub pp_range{
 	}
 }
 
+sub pp_flip{
+	if(GIMME_V == G_ARRAY){
+		return $PL_op->first->other;
+	}
+
+	not_implemented 'flip-flop in scalar context';
+}
+sub pp_flop{
+	if(GIMME_V == G_ARRAY){
+		my $right = POP;
+		my $left  = POP;
+
+		my $i   = ${$left->object_2svref};
+		my $max = ${$right->object_2svref};
+
+		if(_range_is_numeric($left, $right) && $i >= $max){
+			return $PL_op->next;
+		}
+
+
+		$max++;
+		while($i ne $max){
+			my $sv = sv_newmortal();
+			$sv->setval($i);
+			PUSH($sv);
+			$i++;
+		}
+	}
+	else{
+		not_implemented 'flip-flop in scalar context';
+	}
+
+	return $PL_op->next;
+}
+
+
 sub pp_preinc{
 	${ TOP()->object_2svref }++;
 
@@ -1144,45 +1199,89 @@ sub pp_postinc{
 sub pp_eq{
 	my $right = POP;
 	my $left  = TOP;
-
 	SET(SvNV($left) == SvNV($right) ? sv_yes : sv_no);
 	return $PL_op->next;
 }
 sub pp_ne{
 	my $right = POP;
 	my $left  = TOP;
-
 	SET(SvNV($left) != SvNV($right) ? sv_yes : sv_no);
 	return $PL_op->next;
 }
 sub pp_lt{
 	my $right = POP;
 	my $left  = TOP;
-
 	SET(SvNV($left) < SvNV($right) ? sv_yes : sv_no);
 	return $PL_op->next;
 }
 sub pp_le{
 	my $right = POP;
 	my $left  = TOP;
-
 	SET(SvNV($left) <= SvNV($right) ? sv_yes : sv_no);
 	return $PL_op->next;
 }
 sub pp_gt{
 	my $right = POP;
 	my $left  = TOP;
-
 	SET(SvNV($left) > SvNV($right) ? sv_yes : sv_no);
 	return $PL_op->next;
 }
 sub pp_ge{
 	my $right = POP;
 	my $left  = TOP;
-
 	SET(SvNV($left) >= SvNV($right) ? sv_yes : sv_no);
 	return $PL_op->next;
 }
+sub pp_ncmp{
+	my $right = POP;
+	my $left  = TOP;
+	SET(SvNV($left) <=> SvNV($right));
+	return $PL_op->next;
+}
+
+sub pp_seq{
+	my $right = POP;
+	my $left  = TOP;
+	SET(SvPV($left) eq SvPV($right) ? sv_yes : sv_no);
+	return $PL_op->next;
+}
+sub pp_sne{
+	my $right = POP;
+	my $left  = TOP;
+	SET(SvPV($left) ne SvPV($right) ? sv_yes : sv_no);
+	return $PL_op->next;
+}
+sub pp_slt{
+	my $right = POP;
+	my $left  = TOP;
+	SET(SvPV($left) lt SvPV($right) ? sv_yes : sv_no);
+	return $PL_op->next;
+}
+sub pp_sle{
+	my $right = POP;
+	my $left  = TOP;
+	SET(SvPV($left) le SvPV($right) ? sv_yes : sv_no);
+	return $PL_op->next;
+}
+sub pp_sgt{
+	my $right = POP;
+	my $left  = TOP;
+	SET(SvPV($left) gt SvPV($right) ? sv_yes : sv_no);
+	return $PL_op->next;
+}
+sub pp_sge{
+	my $right = POP;
+	my $left  = TOP;
+	SET(SvPV($left) ge SvPV($right) ? sv_yes : sv_no);
+	return $PL_op->next;
+}
+sub pp_scmp{
+	my $right = POP;
+	my $left  = TOP;
+	SET(SvPV($left) cmp SvPV($right));
+	return $PL_op->next;
+}
+
 
 sub pp_add{
 	my $targ  = GET_ATARGET;
@@ -1190,6 +1289,15 @@ sub pp_add{
 	my $left  = TOP;
 
 	SET( $targ->setval(SvNV($left) + SvNV($right)) );
+	return $PL_op->next;
+}
+
+sub pp_multiply{
+	my $targ  = GET_ATARGET;
+	my $right = POP;
+	my $left  = TOP;
+
+	SET( $targ->setval(SvNV($left) * SvNV($right)) );
 	return $PL_op->next;
 }
 
@@ -1250,6 +1358,55 @@ sub pp_say{
 	return $PL_op->next;
 }
 
+sub pp_bless{
+	my $pkg;
+	if(MAXARG == 1){
+		$pkg = $PL_curcop->stashpv;
+	}
+	else{
+		my $sv = POP;
+		if($sv->ROK){
+			apvm_die 'Attempt to bless into a reference';
+		}
+		$pkg = SvPV($sv);
+		if($pkg eq ''){
+			apvm_warn q{Explicit blessing to '' (assuming package main)};
+		}
+	}
+	bless ${TOP->object_2svref}, $pkg;
+	return $PL_op->next;
+}
+
+sub pp_push{
+	my $mark = POPMARK;
+	my $av   = $PL_stack[++$mark];
+	my $n    = push @{$av->object_2svref}, mark_list($mark);
+	SETval($n);
+	return $PL_op->next;
+}
+
+sub pp_pop{
+	my $av  = POP;
+	my $val = pop @{$av->object_2svref};
+	mPUSH(svref_2object(\$val));
+	return $PL_op->next;
+}
+
+sub pp_shift{
+	my $av  = POP;
+	my $val = shift @{$av->object_2svref};
+	mPUSH(svref_2object(\$val));
+	return $PL_op->next;
+}
+	
+sub pp_unshift{
+	my $mark = POPMARK;
+	my $av   = $PL_stack[++$mark];
+	my $n    = unshift @{$av->object_2svref}, mark_list($mark);
+	SETval($n);
+	return $PL_op->next;
+}
+
 sub pp_aelemfast{
 	my $av   = $PL_op->flags & OPf_SPECIAL ? PAD_SV($PL_op->targ) : GVOP_gv($PL_op)->AV;
 	my $lval = $PL_op->flags & OPf_MOD || LVRET;
@@ -1261,7 +1418,7 @@ sub pp_aelemfast{
 sub pp_aelem{
 	my $elemsv = POP;
 	my $av     = TOP;
-	my $lval  = $PL_op->flags & OPf_MOD || LVRET;
+	my $lval   = $PL_op->flags & OPf_MOD || LVRET;
 
 	if($elemsv->ROK){
 		apvm_warn q{Use of reference %s as array index}, $elemsv->object_2svref;
@@ -1286,6 +1443,26 @@ sub pp_values{
 	return &_do_kv;
 }
 
+sub pp_wantarray{
+	my $cxix = dopoptosub($#PL_cxstack);
+	if($cxix < 0){
+		PUSH(sv_undef);
+	}
+	else{
+		my $gimme = $PL_cxstack[$cxix]->gimme;
+		if($gimme == G_ARRAY){
+			PUSH(sv_yes);
+		}
+		elsif($gimme == G_SCALAR){
+			PUSH(sv_no);
+		}
+		else{
+			PUSH(sv_undef);
+		}
+	}
+	return $PL_op->next;
+}
+
 sub pp_undef{
 	if(!$PL_op->private){
 		PUSH(sv_undef);
@@ -1303,6 +1480,14 @@ sub pp_not{
 	SET( !SvTRUE(TOP) ? sv_yes : sv_no );
 	return $PL_op->next;
 }
+
+sub pp_qr{
+	my $re = $PL_op->precomp;
+
+	mPUSH(svref_2object(\qr/$re/));
+	return $PL_op->next;
+}
+
 
 1;
 __END__

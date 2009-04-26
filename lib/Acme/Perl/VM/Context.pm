@@ -1,9 +1,9 @@
 package Acme::Perl::VM::Context;
 use Mouse;
 
+
 sub type{
-	my $type = ref( $_[0] );
-	$type =~ s/^Acme::Perl::VM::Context:://;
+	(my $type = ref($_[0])) =~ s/^Acme::Perl::VM::Context:://;
 
 	return $type;
 }
@@ -19,22 +19,32 @@ extends 'Acme::Perl::VM::Context';
 has gimme => (
 	is  => 'rw',
 	isa => 'Int',
+
+	required => 1,
 );
 has oldsp => (
 	is  => 'rw',
 	isa => 'Int',
+
+	required => 1
 );
 has oldcop => (
 	is  => 'rw',
 	isa => 'B::COP',
+
+	required => 1,
 );
 has oldmarksp => (
 	is  => 'rw',
 	isa => 'Int',
+
+	required => 1,
 );
 has oldscopesp => (
 	is  => 'rw',
 	isa => 'Int',
+
+	required => 1,
 );
 
 sub CURPAD_SAVE{
@@ -60,6 +70,8 @@ extends 'Acme::Perl::VM::Context::BLOCK';
 has cv => (
 	is  => 'rw',
 	isa => 'B::CV',
+
+	required => 1,
 );
 
 has olddepth => (
@@ -69,11 +81,15 @@ has olddepth => (
 has hasargs => (
 	is  => 'rw',
 	isa => 'Bool',
+
+	required => 1,
 );
 
 has retop => (
 	is  => 'rw',
 	isa => 'B::OBJECT', # NULL or B::OP
+
+	required => 1,
 );
 
 has oldcomppad => (
@@ -94,6 +110,13 @@ has lval => (
 	isa => 'Bool',
 );
 
+sub BUILD{
+	my($cx) = @_;
+
+	$cx->olddepth($cx->cv->DEPTH);
+	return;
+}
+
 __PACKAGE__->meta->make_immutable();
 
 package Acme::Perl::VM::Context::EVAL;
@@ -106,6 +129,8 @@ package Acme::Perl::VM::Context::LOOP;
 use Mouse;
 extends 'Acme::Perl::VM::Context::BLOCK';
 
+use Acme::Perl::VM qw($PL_op $PL_curcop);
+
 has label => (
 	is  => 'rw',
 	isa => 'Maybe[Str]',
@@ -113,6 +138,8 @@ has label => (
 has resetsp => (
 	is  => 'rw',
 	isa => 'Int',
+
+	required => 1,
 );
 has myop => (
 	is  => 'rw',
@@ -122,6 +149,16 @@ has nextop => (
 	is  => 'rw',
 	isa => 'B::OP',
 );
+
+sub BUILD{
+	my($cx) = @_;
+
+	$cx->label($PL_curcop->label);
+	$cx->myop($PL_op);
+	$cx->nextop($PL_op->nextop);
+
+	return;
+}
 
 sub ITERVAR(){ undef }
 
@@ -136,24 +173,25 @@ has padvar => (
 	is  => 'rw',
 	isa => 'Bool',
 
+	required => 1,
 );
 has for_def => (
 	is => 'rw',
 	isa => 'Bool',
+
+	required => 1,
 );
 
+has iterdata => (
+	is  => 'rw',
+	isa => 'Defined',
+
+	required => 1,
+);
 if(USE_ITHREADS){
-	has iterdata => (
-		is => 'rw',
-	);
 	has oldcomppad => (
 		is  => 'rw',
 		isa => 'B::AV',
-	);
-}
-else{
-	has itervar => (
-		is => 'rw',
 	);
 }
 
@@ -177,6 +215,12 @@ has itermax => (
 
 sub type(){ 'LOOP' } # this is a LOOP
 
+sub BUILD{
+	my($cx) = @_;
+	$cx->ITERDATA_SET($cx->iterdata);
+	return;
+}
+
 
 sub ITERVAR{
 	my($cx) = @_;
@@ -189,18 +233,15 @@ sub ITERVAR{
 		}
 	}
 	else{
-		return $cx->itervar;
+		return $cx->iterdata;
 	}
 }
 sub ITERDATA_SET{
 	my($cx, $idata) = @_;
 	if(USE_ITHREADS){
 		$cx->CURPAD_SAVE();
-		$cx->iterdata($idata);
 	}
-	else{
-		$cx->itervar($idata);
-	}
+
 	$cx->itersave($cx->ITERVAR);
 }
 

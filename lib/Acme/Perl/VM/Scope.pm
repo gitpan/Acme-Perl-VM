@@ -6,8 +6,8 @@ use Acme::Perl::VM::B ();
 use Scalar::Util ();
 
 if(APVM_DEBUG){
-	has saved_at => (
-		is  => 'rw',
+	has saved_state => (
+		is  => 'ro',
 
 		builder => '_save',
 	);
@@ -22,8 +22,9 @@ sub type{
 
 sub _save{
 	my(undef, $file, $line) = caller(2);
+	$file =~ s{\A .* Acme/Perl .* /}{}xmsi;
 	my $proc = $PL_op ? ('in '.$PL_op->name.' ') : '';
-	return $proc . sprintf q{at %s line %d}, $file, $line;
+	return sprintf q{saved %s}.q{at %s line %d}, $proc, $file, $line;
 }
 
 __PACKAGE__->meta->make_immutable();
@@ -91,22 +92,31 @@ package Acme::Perl::VM::Scope::Clearsv;
 use Mouse;
 extends 'Acme::Perl::VM::Scope';
 
-use Acme::Perl::VM qw(APVM_SCOPE deb @PL_cxstack);
+use Acme::Perl::VM qw(APVM_SCOPE deb @PL_cxstack $PL_comppad_name $PL_op PAD_SV);
 
 has sv => (
 	is  => 'ro',
 	isa => 'B::SV',
 );
 
+sub _save{
+	my($self) = @_;
+	my $off   = $PL_op->targ;
+	my $name;
+
+	if(PAD_SV($off) && ${PAD_SV($off)} == ${$self->sv}){
+		$name = $PL_comppad_name->ARRAYelt($off)->PVX;
+	}
+	else{
+		$name = sprintf '%s(0x%x)', $self->sv->class, ${ $self->sv };
+	}
+	return $name . ' ' . $self->next::method();
+}
+
 sub leave{
 	my($self) = @_;
 
 	my $sv = $self->sv;
-	if(APVM_SCOPE){
-		my $skipped = $sv->REFCNT > 1 || $sv->STASH;
-		deb "%s" . "clearsv %s saved at %s%s\n", (q{>} x (@PL_cxstack+1)),
-			$self->sv->object_2svref, $self->saved_at, $skipped ? ' (skipped)' : '';
-	}
 	return if $sv->REFCNT > 1 || $sv->STASH;
 
 
@@ -197,20 +207,59 @@ __PACKAGE__->meta->make_immutable();
 package Acme::Perl::VM::Scope::Scalar;
 use Mouse;
 extends 'Acme::Perl::VM::Scope::Localizer';
+
+sub _save{
+	my($self) = @_;
+	return Acme::Perl::VM::gv_fullname($self->gv, '$');
+}
+
 sub save_type(){ 'SCALAR' }
 sub create_ref{
 	my($self) = @_;
-	return \local(${*{ $self->gv->object_2svref }}); # to copy MAGIC
+
+	if($self->gv->SV->MAGICAL){
+		bless $self, 'Acme::Perl::VM::Scope::Scalar::Magical';
+		$self->old_value(${$self->old_ref});
+		return \local(${*{ $self->gv->object_2svref }}); # to copy MAGIC
+	}
+	else{
+		return \my $scalar;
+	}
 }
 sub sv{
 	my($self) = @_;
 	return $self->gv->SV;
 }
+
+__PACKAGE__->meta->make_immutable();
+
+package Acme::Perl::VM::Scope::Scalar::Magical;
+use Mouse;
+extends 'Acme::Perl::VM::Scope::Scalar';
+
+has old_value => (
+	is => 'rw',
+);
+
+sub leave{
+	my($self) = @_;
+	$self->SUPER::leave();
+	
+	${$self->old_ref} = $self->old_value;
+	return;
+}
+
 __PACKAGE__->meta->make_immutable();
 
 package Acme::Perl::VM::Scope::Array;
 use Mouse;
 extends 'Acme::Perl::VM::Scope::Localizer';
+
+sub _save{
+	my($self) = @_;
+	return Acme::Perl::VM::gv_fullname($self->gv, '@');
+}
+
 sub save_type(){ 'ARRAY' }
 sub create_ref{
 	my($self) = @_;
@@ -225,6 +274,12 @@ __PACKAGE__->meta->make_immutable();
 package Acme::Perl::VM::Scope::Hash;
 use Mouse;
 extends 'Acme::Perl::VM::Scope::Localizer';
+
+sub _save{
+	my($self) = @_;
+	return Acme::Perl::VM::gv_fullname($self->gv, '%');
+}
+
 sub save_type(){ 'HASH' }
 sub create_ref{
 	my($self) = @_;

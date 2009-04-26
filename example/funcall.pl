@@ -1,7 +1,9 @@
 #!perl -w
-
 use strict;
-use Acme::Perl::VM;
+use FindBin qw($Bin);
+use lib "$Bin/../lib";
+
+use Acme::Perl::VM::Run;
 
 sub hello{
 	my($s) = @_;
@@ -9,6 +11,4 @@ sub hello{
 	print "Hello, $s world!\n";
 }
 
-run_block {
-	hello("APVM");
-};
+hello("APVM");

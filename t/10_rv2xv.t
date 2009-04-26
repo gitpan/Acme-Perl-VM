@@ -1,7 +1,7 @@
 #!perl -w
 
 use strict;
-use Test::More tests => 22;
+use Test::More tests => 24;
 
 use Acme::Perl::VM;
 use Acme::Perl::VM qw(:perl_h);
@@ -43,17 +43,22 @@ is scalar(run_block{
 is $x, 10;
 
 {
-	local $TODO = 'mg locaization';
-
 	local $|;
-	my $mg = run_block{
-		local $| = 42;
-		return \$|;
+	my $autoflush = run_block{
+		local $| = 1;
+		return $|;
 	};
-
-	ok svref_2object($mg)->MAGICAL, 'magic vars';
-
-	ok !$| or diag '$| = '.$|;
+	ok $autoflush;
+	ok !$|;
+}
+{
+	local $| = 1;
+	my $autoflush = run_block{
+		local $| = 0;
+		return $|;
+	};
+	ok !$autoflush;
+	ok $|;
 }
 
 our @a = (1);

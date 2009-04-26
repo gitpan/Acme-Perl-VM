@@ -1,7 +1,7 @@
 #!perl -w
 
 use strict;
-use Test::More tests => 12;
+use Test::More tests => 14;
 
 use Acme::Perl::VM;
 use Acme::Perl::VM qw(:perl_h);
@@ -66,6 +66,27 @@ $x = run_block{
 	return $sum;
 };
 is $x, 5;
+
+$x = run_block{
+	my %h = (foo => 10, bar => 20);
+	my $sum = 0;
+	foreach my $key(keys %h){
+		$sum += $h{$key};
+	}
+	return $sum;
+};
+is $x, 30;
+
+
+$x = run_block{
+	my %h = (foo => 10, bar => 20);
+	my $sum = 0;
+	foreach my $val(values %h){
+		$sum += $val;
+	}
+	return $sum;
+};
+is $x, 30;
 
 
 is_deeply \@PL_stack,      [], '@PL_stack is empty';

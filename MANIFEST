@@ -2,7 +2,9 @@ Changes
 example/for.pl
 example/foreach.pl
 example/funcall.pl
-example/funcall_run.pl
+example/hello-concise.pl
+example/hello-Dt.pl
+example/hello-trace.pl
 example/hello.pl
 example/methcall.pl
 example/quine.pl
@@ -40,6 +42,12 @@ t/10_rv2xv.t
 t/11_readline.t
 t/12_anon.t
 t/13_foreach.t
+t/14_assign2.t
+t/15_range.t
+t/16_wantarray.t
+t/17_pushpop.t
+t/18_extern.t
+t/19_bless.t
 xt/01_podspell.t
 xt/02_pod.t
 xt/03_pod-coverage.t

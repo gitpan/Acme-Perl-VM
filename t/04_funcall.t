@@ -1,7 +1,7 @@
 #!perl -w
 
 use strict;
-use Test::More tests => 18;
+use Test::More tests => 20;
 
 use Acme::Perl::VM;
 use Acme::Perl::VM qw(:perl_h);
@@ -14,6 +14,10 @@ sub g{
 }
 sub h{
 	@_;
+}
+
+sub inc{
+	$_[0]++;
 }
 
 my $x;
@@ -51,6 +55,19 @@ for my $i(1 .. 3){
 is_deeply [run_block{        h(10, 20, 30) }], [10, 20, 30];
 is_deeply [run_block{ scalar h(10, 20, 30) }], [3];
 is_deeply [scalar run_block{ h(10, 20, 30) }], [3];
+
+is run_block{
+	my $i = 10;
+	inc($i);
+	return $i;
+}, 11;
+
+is run_block{
+	my $i = 10;
+	inc($i);
+	inc($i);
+	return $i;
+}, 12;
 
 is_deeply \@PL_stack,      [], '@PL_stack is empty';
 is_deeply \@PL_markstack,  [], '@PL_markstack is empty';

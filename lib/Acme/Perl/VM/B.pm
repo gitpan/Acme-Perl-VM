@@ -58,25 +58,41 @@ my %special_sv = (
 	${ B::sv_no() }    => \(1 != 1),
 );
 
+unless(@B::specialsv_name){
+	@B::specialsv_name = qw(
+		Nullsv
+		&PL_sv_undef
+		&PL_sv_yes
+		&PL_sv_no
+		pWARN_ALL
+		pWARN_NONE
+		pWARN_STD
+	);
+}
+
 sub object_2svref{
 	my($obj) = @_;
 
 	return $special_sv{ $$obj } || do{
-		my $name = $B::specialsv_name[$$obj] || sprintf 'SPECIAL(0x%x)', $$obj;
-		Carp::confess($name, ' is not a normal SV object');
+		Carp::confess($obj->special_name, ' is not a normal SV object');
 	};
 }
 
 sub setval{
 	my($obj) = @_;
 
-	my $name = $B::specialsv_name[$$obj] || sprintf 'SPECIAL(0x%x)', $$obj;
-	Acme::Perl::VM::apvm_die("Modification of read-only value ($name) attempted");
+	Acme::Perl::VM::apvm_die('Modification of read-only value (%s) attempted', $obj->special_name);
 }
 
-sub STASH{ undef }
+sub STASH(){ undef }
 
-sub POK{ 0 }
+sub POK(){ 0 }
+sub ROK(){ 0 }
+
+sub special_name{
+	my($obj) = @_;
+	return $B::specialsv_name[$$obj] || sprintf 'SPECIAL(0x%x)', $$obj;
+}
 
 package
 	B::SV;
@@ -115,7 +131,16 @@ sub toCV{
 	Carp::croak(sprintf 'Cannot convert %s to a CV', B::class($sv));
 }
 
-sub STASH{ undef }
+sub STASH(){ undef }
+
+package
+	B::PVMG;
+
+sub ROK{
+	my($obj) = @_;
+	my $dummy = ${ $obj->object_2svref }; # invoke mg_get()
+	return $obj->SUPER::ROK;
+}
 
 package
 	B::CV;
@@ -126,14 +151,19 @@ sub clear{
 	Carp::croak('Cannot clear a CV');
 }
 
+sub ROK(){ 0 }
+
 package
 	B::GV;
+
 
 sub toCV{ $_[0]->CV }
 
 sub clear{
 	Carp::croak('Cannot clear a CV');
 }
+
+sub ROK(){ 0 }
 
 package
 	B::AV;
@@ -155,8 +185,12 @@ unless(__PACKAGE__->can('OFF')){
 	constant->import(OFF => 0);
 }
 
+sub ROK(){ 0 }
+
 package
 	B::HV;
+
+sub ROK(){ 0 }
 
 *setsv = \&B::AV::setsv;
 
