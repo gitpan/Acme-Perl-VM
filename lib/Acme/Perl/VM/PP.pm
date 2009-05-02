@@ -134,7 +134,7 @@ sub pp_rv2sv{
 	}
 
 	if($PL_op->flags & OPf_MOD){
-		if($PL_op->op_private & OPpLVAL_INTRO){
+		if($PL_op->private & OPpLVAL_INTRO){
 			if($PL_op->first->name eq 'null'){
 				$sv = save_scalar(TOP);
 			}
@@ -1099,6 +1099,12 @@ sub pp_or{
 	}
 }
 
+sub pp_stringify{
+	my $sv = TOP;
+	SETval(SvPV($sv));
+	return $PL_op->next;
+}
+
 sub pp_defined{
 	if($PL_op->name ne 'defined'){ # dor/dorassign
 		not_implemented 'dor';
@@ -1398,12 +1404,20 @@ sub pp_shift{
 	mPUSH(svref_2object(\$val));
 	return $PL_op->next;
 }
-	
+
 sub pp_unshift{
 	my $mark = POPMARK;
 	my $av   = $PL_stack[++$mark];
 	my $n    = unshift @{$av->object_2svref}, mark_list($mark);
 	SETval($n);
+	return $PL_op->next;
+}
+
+sub pp_join{
+	my $mark = POPMARK;
+
+	my $delim = $PL_stack[++$mark];
+	SETval(join SvPV($delim), mark_list($mark));
 	return $PL_op->next;
 }
 

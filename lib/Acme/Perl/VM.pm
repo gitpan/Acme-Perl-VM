@@ -5,7 +5,7 @@ use strict;
 use warnings;
 
 BEGIN{
-	require version; our $VERSION = version::qv('0.0.3');
+	require version; our $VERSION = version::qv('0.0.4');
 }
 
 use constant APVM_DEBUG  => ($ENV{APVM_DEBUG} || do{ our $VERSION->is_alpha || 0 });
@@ -89,7 +89,7 @@ BEGIN{
 
 	
 
-	if(-t *STDERR){
+	if(APVM_DEBUG && -t *STDERR){
 		require Term::ANSIColor;
 
 		*deb = \&_deb_colored;
@@ -1118,7 +1118,7 @@ Acme::Perl::VM - An implementation of Perl5 Virtual Machine in Pure Perl (APVM)
 
 =head1 VERSION
 
-This document describes Acme::Perl::VM version 0.01.
+This document describes Acme::Perl::VM version 0.0.4.
 
 =head1 SYNOPSIS
 

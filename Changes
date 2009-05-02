@@ -1,5 +1,9 @@
 Revision history for Perl extension Acme::Perl::VM
 
+0.0.4 Sat May  2 15:34:24 2009
+	- fix some bugs
+	- add ppcodes
+
 0.0.3 Sun Apr 26 14:13:42 2009
 	- add description to Acme/Perl/VM/JA.pod
 	- add a number of ppcodes and tests
