@@ -1075,26 +1075,38 @@ sub pp_cond_expr{
 		return $PL_op->next;
 	}
 }
+
 sub pp_and{
 	if(!SvTRUE(TOP)){
 		return $PL_op->next;
 	}
 	else{
-		apvm_die 'panic: pp_and (%s)', $PL_op->name if $PL_op->name ne 'and';
-
 		--$#PL_stack;
 		return $PL_op->other;
 	}
 }
-
 sub pp_or{
 	if(SvTRUE(TOP)){
 		return $PL_op->next;
 	}
 	else{
-		apvm_die 'panic: pp_or (%s)', $PL_op->name if $PL_op->name ne 'or';
-
 		--$#PL_stack;
+		return $PL_op->other;
+	}
+}
+sub pp_andassign{
+	if(!SvTRUE(TOP)){
+		return $PL_op->next;
+	}
+	else{
+		return $PL_op->other;
+	}
+}
+sub pp_orassign{
+	if(SvTRUE(TOP)){
+		return $PL_op->next;
+	}
+	else{
 		return $PL_op->other;
 	}
 }
@@ -1106,10 +1118,6 @@ sub pp_stringify{
 }
 
 sub pp_defined{
-	if($PL_op->name ne 'defined'){ # dor/dorassign
-		not_implemented 'dor';
-	}
-
 	my $sv   = POP;
 	my $type = $sv->class;
 	my $ref  = $sv->object_2svref;

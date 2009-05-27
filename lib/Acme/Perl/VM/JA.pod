@@ -27,9 +27,9 @@ APVMはこのBモジュールを利用して構文木を解釈・実行するモ
 
 Perl5の仮想マシンはスタックマシンであり，組み込み演算子やサブルーチンなどの手続きの引数と戻り値を，スタックを通じてやり取りします。
 
-この仮想マシンのマシンコードはopcodeと呼ばれ，これがコンパイルされたPerlプログラムの最小単位となります。オペコードはさらにデータと手続きからなるオブジェクトとして表現され，その手続きはppcode(PUSH/POP code)と呼ばれます。
+この仮想マシンのマシンコードはopcodeと呼ばれ，これがコンパイルされたPerlプログラムの最小単位となります。opcodeはさらにデータと手続きからなるオブジェクトとして表現され，その手続きはppcode(PUSH/POP code)と呼ばれる関数として実現されます。
 
-opcodeオブジェクトは他のopcodeオブジェクトへのリンクを持つ木構造を成しており，このopcodeの木を構文木と呼びます。したがって，Perlプログラムを実行するというのは，Opcodeを実行しつつ，この木構造をたどって行く過程ということになります。
+opcodeオブジェクトは他のopcodeオブジェクトへのリンクを持つ木構造を成しており，このopcodeの木を構文木と呼びます。したがって，Perlプログラムを実行するというのは，opcodeを実行しつつ，この木構造をたどって行く過程ということになります。
 
 ここでは以下のPerlコードを例にとり，プログラムの実行を追っていきます：
 
@@ -121,7 +121,7 @@ See also F<pp.h>.
 Perlプログラムの最小単位である，手続きとデータを持ったオブジェクトです。
 opcodeクラス群はCの構造体の先頭メンバをいくつか共有する構造体群として表現されます。
 
-opcodeの持つ手続きは対応するppcodeであり，C<op_ppaddr>メンバで参照します。
+opcodeオブジェクトの持つ手続きは対応するppcodeであり，C<op_ppaddr>メンバで参照します。
 データはPerlの値やCの値，または他のopcodeへのリンクです。
 
 各opcodeオブジェクトは名前と外部出力用の説明を持ち，それぞれC<OP_NAME(op)>，C<OP_DESC(op)>マクロで得ることができます。
@@ -185,7 +185,7 @@ OP_CONSTであれば可能性のあるプログラムの経路は常に一つで
 
 =back
 
-ppcodeはopcodeオブジェクトのC<op_ppaddr>メンバを通じて取得・変更することができます。このC<op_ppaddr>をC<PL_check>というコンパイラフックテーブルを通じて変更し，プログラムの挙動を変える手法がB<PL_check hack>として知られています。たとえば，C<autobox>はこのC<PL_check>ハックを用いてプリミティブ値に対するメソッド呼び出しを実現しています。
+ppcodeはopcodeオブジェクトのC<op_ppaddr>メンバを通じて取得・変更することができます。このC<op_ppaddr>をC<PL_check>というコンパイル時フックテーブルを通じて変更し，プログラムの挙動を変える手法がB<PL_check hack>として知られています。たとえば，C<autobox>はこのC<PL_check>ハックを用いてプリミティブ値に対するメソッド呼び出しを実現しています。
 
 See also F<pp.c>, F<pp_hot.c>, F<pp_ctl.c>, F<pp_sys.c>, F<pp_sort.c> and F<pp_pack.c>.
 
@@ -258,6 +258,8 @@ APVMにもopcodeトレース機能があります。環境変数C<APVM_DEBUG>に
 
 Perlの標準モジュールC<B::Concise>でも構文木を出力することができます。このときC<-exec>オプションを渡すと，実行順にopcodeを並べて出力します。ただし，C<B::Concise>では静的な解析しかできません。
 
+CPANにあるC<Devel::Optrace>はAPVMのopcodeトレース機能を標準Perl VMで使えるようにしたモジュールです。このモジュールはC<-DDEBUGGING>が指定されていないperlでも利用できます。
+
 =head1 NOTES
 
 このモジュールは2009年4月22日に東京で開催されたB<Shibuya.pm テクニカルトーク#11>で発表されました。
@@ -285,6 +287,10 @@ F<scope.h> and F<scope.c> for scope stacks.
 F<pad.h> and F<pad.c> for pad variables.
 
 F<run.c> for runops.
+
+L<B::Concise>.
+
+L<Devel::Optrace>.
 
 =head1 LICENSE AND COPYRIGHT
 

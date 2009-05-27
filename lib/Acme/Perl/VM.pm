@@ -5,7 +5,7 @@ use strict;
 use warnings;
 
 BEGIN{
-	require version; our $VERSION = version::qv('0.0.4');
+	require version; our $VERSION = version::qv('0.0.5');
 }
 
 use constant APVM_DEBUG  => ($ENV{APVM_DEBUG} || do{ our $VERSION->is_alpha || 0 });
@@ -1118,7 +1118,7 @@ Acme::Perl::VM - An implementation of Perl5 Virtual Machine in Pure Perl (APVM)
 
 =head1 VERSION
 
-This document describes Acme::Perl::VM version 0.0.4.
+This document describes Acme::Perl::VM version 0.0.5.
 
 =head1 SYNOPSIS
 
@@ -1148,6 +1148,10 @@ Goro Fuji (gfx) E<lt>gfuji(at)cpan.orgE<gt>.
 
 =head1 SEE ALSO
 
+L<perlapi>.
+
+L<perlhack>.
+
 F<pp.h> for PUSH/POP macros.
 
 F<pp.c>, F<pp_ctl.c>, and F<pp_hot.c> for ppcodes.
@@ -1161,6 +1165,10 @@ F<scope.h> and F<scope.c> for scope stacks.
 F<pad.h> and F<pad.c> for pad variables.
 
 F<run.c> for runops.
+
+L<B::Concise>.
+
+L<Devel::Optrace>.
 
 =head1 LICENSE AND COPYRIGHT
 

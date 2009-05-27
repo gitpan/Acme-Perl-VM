@@ -49,6 +49,7 @@ t/17_pushpop.t
 t/18_extern.t
 t/19_bless.t
 t/20_join.t
+t/21_assign3.t
 xt/01_podspell.t
 xt/02_pod.t
 xt/03_pod-coverage.t
