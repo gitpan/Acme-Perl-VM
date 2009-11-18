@@ -2,28 +2,28 @@ package Acme::Perl::VM::Run;
 
 use strict;
 use warnings;
-use Acme::Perl::VM qw(:perl_h);
+use Acme::Perl::VM    qw(:perl_h);
 use B qw(main_start comppadlist);
 
 no warnings 'void';
 INIT{
-	if(!APVM_DUMMY){
-		if(is_not_null(main_start)){
-			ENTER;
-			SAVETMPS;
+    return if APVM_DUMMY;
 
-			$PL_curcop ||= bless \do{ my $addr = 0 }, 'B::COP'; # dummy cop
+    if(is_not_null(main_start)){
+        ENTER;
+        SAVETMPS;
 
-			$PL_op = main_start;
-			PAD_SET_CUR(comppadlist, 1);
+        $PL_curcop ||= bless \do{ my $addr = 0 }, 'B::COP'; # dummy cop
 
-			$PL_runops->();
+        $PL_op = main_start;
+        PAD_SET_CUR(comppadlist, 1);
 
-			FREETMPS;
-			LEAVE;
-		}
-		exit;
-	}
+        $PL_runops->();
+
+        FREETMPS;
+        LEAVE;
+    }
+    exit;
 }
 
 1;
@@ -35,10 +35,10 @@ Acme::Perl::VM::Run - Runs a Perl script in APVM
 
 =head1 SYNOPSIS
 
-	#!perl -w
-	use Acme::Perl::VM::Run;
+    #!perl -w
+    use Acme::Perl::VM::Run;
 
-	print "Hello, world!\n";
+    print "Hello, world!\n";
 
 =head1 SEE ALSO
 

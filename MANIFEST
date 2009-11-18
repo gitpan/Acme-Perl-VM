@@ -14,8 +14,9 @@ inc/Module/Install.pm
 inc/Module/Install/AuthorTests.pm
 inc/Module/Install/Base.pm
 inc/Module/Install/Makefile.pm
-inc/Module/Install/MakeMaker.pm
 inc/Module/Install/Metadata.pm
+inc/Module/Install/Repository.pm
+inc/Module/Install/WriteAll.pm
 lib/Acme/Perl/VM.pm
 lib/Acme/Perl/VM/B.pm
 lib/Acme/Perl/VM/Context.pm
